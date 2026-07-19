@@ -9,6 +9,6 @@ flutter build <platform>
 ```
 
 支持平台：
-    - Android
-    - Windows
-    - Linux
+  - Android
+  - Windows
+  - Linux
