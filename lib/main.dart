@@ -1,3 +1,9 @@
+/**
+ * @file main.dart
+ * @brief 应用入口
+ * @author CorvusCinereus
+ */
+
 import 'package:flutter/material.dart';
 import 'pages/home_page.dart';
 
