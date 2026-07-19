@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import 'package:chatlaw/pages/start_page.dart';
 import 'package:chatlaw/pages/page_index.dart';
 import 'package:chatlaw/internal/config.dart';
+import 'package:chatlaw/pages/server_page.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
@@ -55,6 +56,9 @@ class _HomePageState extends State<HomePage> {
       case PageIndex.chat:
         break;
       case PageIndex.server:
+        setState(() {
+          _body = ServerPage(config: _config!, serverName: serverName, addServer: _addServer, setPage: _setPage);
+        });
         break;
       case PageIndex.setting:
         break;
@@ -78,5 +82,24 @@ class _HomePageState extends State<HomePage> {
       _config = AppConfig.defaultConfig();
     }
     _setPage(PageIndex.start);
+  }
+
+  void _addServer(String name, String address) {
+    _config!.serverConfigs.add(ServerConfig(name, address));
+    _saveConfig();
+  }
+
+  /// @brief 保存应用配置
+  void _saveConfig() async {
+    final path = await getApplicationDocumentsDirectory();
+    final dir = Directory("${path.path}/ChatLaw");
+    if (await dir.exists()) {
+      final file = File('${dir.path}/config.json');
+      await file.writeAsString(jsonEncode(_config!.toJson()));
+    } else {
+      await dir.create(recursive: true);
+      final file = File('${dir.path}/config.json');
+      await file.writeAsString(jsonEncode(_config!.toJson()));
+    }
   }
 }

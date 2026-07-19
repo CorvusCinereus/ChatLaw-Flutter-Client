@@ -37,6 +37,9 @@ class _StartPageState extends State<StartPage> {
                   // 已有的服务器配置按钮
                   ...widget.config.serverConfigs.map(
                     (config) => ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        minimumSize: const Size.fromHeight(50),
+                      ),
                       onPressed: () {
                         widget.setPage(PageIndex.chat, serverName: config.name);
                       },

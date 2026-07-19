@@ -50,9 +50,9 @@ class AppConfig {
 
 class ServerConfig {
   String name;
-  String serverUrl;
+  String address;
 
-  ServerConfig(this.name, this.serverUrl);
+  ServerConfig(this.name, this.address);
 
   factory ServerConfig.defaultConfig() =>
       ServerConfig('默认', 'http://localhost:8080');
@@ -60,13 +60,13 @@ class ServerConfig {
   /// @brief 服务器配置转换为 JSON 格式
   /// @return JSON 格式的服务器配置
   Map<String, dynamic> toJson() {
-    return {'name': name, 'server_url': serverUrl};
+    return {'name': name, 'address': address};
   }
 
   /// @brief 服务器配置从 JSON 格式解析
   /// @param json JSON 格式的服务器配置
   /// @return 服务器配置实例
   factory ServerConfig.fromJson(Map<String, dynamic> json) {
-    return ServerConfig(json['name'], json['server_url']);
+    return ServerConfig(json['name'], json['address']);
   }
 }
