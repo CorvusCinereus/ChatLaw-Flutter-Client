@@ -12,6 +12,7 @@ import 'package:chatlaw/pages/start_page.dart';
 import 'package:chatlaw/pages/page_index.dart';
 import 'package:chatlaw/internal/config.dart';
 import 'package:chatlaw/pages/server_page.dart';
+import 'package:chatlaw/pages/chat_page.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
@@ -55,6 +56,13 @@ class _HomePageState extends State<HomePage> {
         });
         break;
       case PageIndex.chat:
+        setState(() {
+          _body = ChatPage(
+            appConfig: _config!,
+            serverName: serverName!,
+            setPage: _setPage,
+          );
+        });
         break;
       case PageIndex.server:
         setState(() {

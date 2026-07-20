@@ -4,6 +4,8 @@
  * @author CorvusCinereus
  */
 
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 
 /**
@@ -14,11 +16,12 @@ import 'package:flutter/material.dart';
 class AppConfig {
   TextStyle textStyle;
   List<ServerConfig> serverConfigs;
+  List<Map<String, dynamic>> history;
 
-  AppConfig(this.textStyle, this.serverConfigs);
+  AppConfig(this.textStyle, this.serverConfigs, this.history);
 
   factory AppConfig.defaultConfig() =>
-      AppConfig(TextStyle(fontSize: 19, color: Colors.black), []);
+      AppConfig(TextStyle(fontSize: 19, color: Color(0xFF4A4A4A)), [], []);
 
   /// @brief 应用配置转换为 JSON 格式
   /// @return JSON 格式的应用配置
@@ -29,6 +32,7 @@ class AppConfig {
         'color': textStyle.color?.toARGB32() ?? Colors.black.toARGB32(),
       },
       'server_configs': serverConfigs.map((e) => e.toJson()).toList(),
+      'history': history.map((e) => jsonEncode(e)).toList(),
     };
   }
 
@@ -36,7 +40,6 @@ class AppConfig {
   /// @param json JSON 格式的应用配置
   /// @return 应用配置实例
   factory AppConfig.fromJson(Map<String, dynamic> json) {
-    print("LOG: ${json['server_configs']}");
     return AppConfig(
       TextStyle(
         fontSize: json['text_style']['font_size'],
@@ -44,6 +47,9 @@ class AppConfig {
       ),
       (json['server_configs'] as List<dynamic>)
           .map((e) => ServerConfig.fromJson(e))
+          .toList(),
+      (json['history'] as List<dynamic>)
+          .map((e) => jsonDecode(e) as Map<String, dynamic>)
           .toList(),
     );
   }
