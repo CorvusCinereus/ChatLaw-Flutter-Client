@@ -6,6 +6,7 @@
 
 import 'dart:convert';
 
+import 'package:chatlaw/pages/dialog.dart';
 import 'package:flutter/material.dart';
 import 'package:chatlaw/pages/start_page.dart';
 import 'package:chatlaw/pages/page_index.dart';
@@ -57,7 +58,12 @@ class _HomePageState extends State<HomePage> {
         break;
       case PageIndex.server:
         setState(() {
-          _body = ServerPage(config: _config!, serverName: serverName, addServer: _addServer, setPage: _setPage);
+          _body = ServerPage(
+            config: _config!,
+            serverName: serverName,
+            addServer: _addServer,
+            setPage: _setPage,
+          );
         });
         break;
       case PageIndex.setting:
@@ -67,26 +73,35 @@ class _HomePageState extends State<HomePage> {
 
   /// @brief 加载应用配置
   void _loadConfig() async {
-    final path = await getApplicationDocumentsDirectory();
-    final dir = Directory("${path.path}/ChatLaw");
-    if (await dir.exists()) {
-      final file = File('${dir.path}/config.json');
-      if (await file.exists()) {
-        final json = await file.readAsString();
-        _config = AppConfig.fromJson(jsonDecode(json));
+    try {
+      final path = await getApplicationDocumentsDirectory();
+      final dir = Directory("${path.path}/ChatLaw");
+      if (await dir.exists()) {
+        final file = File('${dir.path}/config.json');
+        if (await file.exists()) {
+          final json = await file.readAsString();
+          _config = AppConfig.fromJson(jsonDecode(json));
+        } else {
+          _config = AppConfig.defaultConfig();
+        }
       } else {
+        await dir.create(recursive: true);
         _config = AppConfig.defaultConfig();
       }
-    } else {
-      await dir.create(recursive: true);
+    } catch (e) {
       _config = AppConfig.defaultConfig();
+      showAlertDialog(context, "配置文件损坏，请重新配置服务器");
     }
     _setPage(PageIndex.start);
   }
 
   void _addServer(String name, String address) {
-    _config!.serverConfigs.add(ServerConfig(name, address));
-    _saveConfig();
+    if (name.isNotEmpty && address.isNotEmpty) {
+      _config!.serverConfigs.add(ServerConfig(name, address));
+      _saveConfig();
+    } else {
+      showAlertDialog(context, "请完整填写配置信息", title: Icon(Icons.error));
+    }
   }
 
   /// @brief 保存应用配置

@@ -36,12 +36,13 @@ class AppConfig {
   /// @param json JSON 格式的应用配置
   /// @return 应用配置实例
   factory AppConfig.fromJson(Map<String, dynamic> json) {
+    print("LOG: ${json['server_configs']}");
     return AppConfig(
       TextStyle(
         fontSize: json['text_style']['font_size'],
         color: Color(json['text_style']['color']),
       ),
-      (json['server_configs'] as List<Map<String, dynamic>>)
+      (json['server_configs'] as List<dynamic>)
           .map((e) => ServerConfig.fromJson(e))
           .toList(),
     );
