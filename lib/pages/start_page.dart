@@ -38,7 +38,7 @@ class _StartPageState extends State<StartPage> {
                   ...widget.config.serverConfigs.map(
                     (config) => ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(50),
+                        minimumSize: const Size(0, 50),
                       ),
                       onPressed: () {
                         widget.setPage(PageIndex.chat, serverName: config.name);
