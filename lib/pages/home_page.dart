@@ -61,6 +61,7 @@ class _HomePageState extends State<HomePage> {
             appConfig: _config!,
             serverName: serverName!,
             setPage: _setPage,
+            addHistory: _addHistory,
           );
         });
         break;
@@ -98,11 +99,14 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (e) {
       _config = AppConfig.defaultConfig();
-      showAlertDialog(context, "配置文件损坏，请重新配置服务器");
+      showAlertDialog(context, "配置文件损坏，请重新配置服务器\n$e");
     }
     _setPage(PageIndex.start);
   }
 
+  /// @brief 添加服务器配置
+  /// @param name 服务器名称
+  /// @param address 服务器地址
   void _addServer(String name, String address) {
     if (name.isNotEmpty && address.isNotEmpty) {
       _config!.serverConfigs.add(ServerConfig(name, address));
@@ -110,6 +114,21 @@ class _HomePageState extends State<HomePage> {
     } else {
       showAlertDialog(context, "请完整填写配置信息", title: Icon(Icons.error));
     }
+  }
+
+  /// @brief 移除服务器配置
+  /// @param name 服务器名称
+  void _removeServer(String name) {
+    _config!.serverConfigs.removeWhere((element) => element.name == name);
+    _saveConfig();
+  }
+
+  /// @brief 添加历史对话
+  /// @param history 对话记录
+  void _addHistory(Map<String, dynamic> history) {
+    _config!.history.removeWhere((element) => element["name"] == history["name"]);
+    _config!.history.add(history);
+    _saveConfig();
   }
 
   /// @brief 保存应用配置

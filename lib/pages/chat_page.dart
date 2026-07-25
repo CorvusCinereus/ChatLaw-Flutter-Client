@@ -4,6 +4,8 @@
  * @author CorvusCinereus
  */
 
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:chatlaw/internal/config.dart';
 import "package:flutter_chat_bubble/chat_bubble.dart";
@@ -14,12 +16,14 @@ class ChatPage extends StatefulWidget {
   final AppConfig _appConfig;
   final String _serverName;
   final Function(PageIndex page, {String? serverName}) _setPage;
+  final Function(Map<String, dynamic> history) _addHistory;
 
   const ChatPage({
     super.key,
     required this._appConfig,
     required this._serverName,
     required this._setPage,
+    required this._addHistory,
   });
 
   @override
@@ -109,17 +113,19 @@ class _ChatPageState extends State<ChatPage>
     return historyList.map<Widget>((item) {
       final title = item["name"] ?? "未命名对话";
       return ListTile(
-        leading: const Icon(Icons.chat, color: Color(0xFFB0BACA)),
+        leading: const Icon(Icons.chat, color: Colors.black),
         title: Text(
           title,
-          style: const TextStyle(color: Color(0xFFE0E4EA)),
+          style: const TextStyle(color: Colors.black),
           overflow: TextOverflow.ellipsis,
         ),
         onTap: () {
           _closeDrawer();
           setState(() {
             _historyName = item["name"] ?? "未命名对话";
-            _history = item["history"] ?? [];
+            _history = (item["history"] as List? ?? [])
+                .whereType<Map<String, dynamic>>()
+                .toList();
           });
         },
       );
@@ -127,9 +133,13 @@ class _ChatPageState extends State<ChatPage>
   }
 
   void _sendMessage(String message) {
-    if (_historyName == "未命名对话") {
-      _historyName = message.length < 7 ? message : message.substring(0, 6);
-    }
+    setState(() {
+      if (_historyName == "未命名对话") {
+        _historyName = message.length < 7 ? message : message.substring(0, 6);
+      }
+      _history.add({"role": "user", "content": message});
+    });
+    widget._addHistory({"name": _historyName, "history": _history});
   }
 
   @override
@@ -167,7 +177,25 @@ class _ChatPageState extends State<ChatPage>
               child: Column(
                 children: [
                   DrawerHeader(
-                    child: Text('历史对话', style: widget._appConfig.textStyle),
+                    child: Column(
+                      children: [
+                        Text('历史对话', style: widget._appConfig.textStyle),
+                        const SizedBox(height: 10),
+                        ElevatedButton(
+                          onPressed: () {
+                            setState(() {
+                              _historyName = "未命名对话";
+                              _history = [];
+                            });
+                            _closeDrawer();
+                          },
+                          child: Text(
+                            "新对话",
+                            style: widget._appConfig.textStyle,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                   Expanded(
                     child: ListView(
@@ -195,10 +223,7 @@ class _ChatPageState extends State<ChatPage>
               Container(
                 height: 60,
                 child: Center(
-                  child: Text(
-                    _historyName,
-                    style: widget._appConfig.textStyle,
-                  ),
+                  child: Text(_historyName, style: widget._appConfig.textStyle),
                 ),
               ),
               Divider(color: Colors.grey[100]),

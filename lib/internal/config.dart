@@ -32,7 +32,7 @@ class AppConfig {
         'color': textStyle.color?.toARGB32() ?? Colors.black.toARGB32(),
       },
       'server_configs': serverConfigs.map((e) => e.toJson()).toList(),
-      'history': history.map((e) => jsonEncode(e)).toList(),
+      'history': history,
     };
   }
 
@@ -40,17 +40,19 @@ class AppConfig {
   /// @param json JSON 格式的应用配置
   /// @return 应用配置实例
   factory AppConfig.fromJson(Map<String, dynamic> json) {
+    final textStyleData = json['text_style'] as Map<String, dynamic>? ?? {};
+    final serverConfigs = json['server_configs'] as List? ?? [];
+    final history = json['history'] as List? ?? [];
     return AppConfig(
       TextStyle(
-        fontSize: json['text_style']['font_size'],
-        color: Color(json['text_style']['color']),
+        fontSize: textStyleData['font_size'] as double? ?? 19.0,
+        color: textStyleData['color'] != null ? Color(textStyleData['color']) : Color(0xFF4A4A4A),
       ),
-      (json['server_configs'] as List<dynamic>)
+      serverConfigs
+          .whereType<Map<String, dynamic>>()
           .map((e) => ServerConfig.fromJson(e))
           .toList(),
-      (json['history'] as List<dynamic>)
-          .map((e) => jsonDecode(e) as Map<String, dynamic>)
-          .toList(),
+      history.whereType<Map<String, dynamic>>().toList(),
     );
   }
 }
@@ -74,6 +76,9 @@ class ServerConfig {
   /// @param json JSON 格式的服务器配置
   /// @return 服务器配置实例
   factory ServerConfig.fromJson(Map<String, dynamic> json) {
-    return ServerConfig(json['name'], json['address']);
+    return ServerConfig(
+      json['name'] as String? ?? '',
+      json['address'] as String? ?? '',
+    );
   }
 }
