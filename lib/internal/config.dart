@@ -5,7 +5,7 @@
  */
 
 import 'dart:convert';
-
+import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
 
 /**
@@ -21,7 +21,7 @@ class AppConfig {
   AppConfig(this.textStyle, this.serverConfigs, this.history);
 
   factory AppConfig.defaultConfig() =>
-      AppConfig(TextStyle(fontSize: 19, color: Color(0xFF4A4A4A)), [], []);
+      AppConfig(TextStyle(fontSize: Platform.isAndroid ? 14 : 19, color: Color(0xFF4A4A4A)), [], []);
 
   /// @brief 应用配置转换为 JSON 格式
   /// @return JSON 格式的应用配置
