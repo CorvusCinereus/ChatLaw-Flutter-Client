@@ -26,9 +26,16 @@ class ChatPage extends StatefulWidget {
   State<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends State<ChatPage> {
+class _ChatPageState extends State<ChatPage>
+    with SingleTickerProviderStateMixin {
   int _serverIndex = -1;
+  String _historyName = "未命名对话";
   List<Map<String, dynamic>> _history = [];
+  TextEditingController _messageController = TextEditingController();
+
+  bool _isDrawerOpen = false;
+  late AnimationController _animationController;
+  List<Widget>? _drawerItems;
 
   @override
   void initState() {
@@ -41,17 +48,141 @@ class _ChatPageState extends State<ChatPage> {
       widget._setPage(PageIndex.start);
     } else {
       setState(() {
-        // _history = widget._appConfig.history[_serverIndex]["history"];
-        _history = [
-          {"role": "user", "content": "你好"},
-          {"role": "assistant", "content": "你好"},
-        ];
+        _history = [];
       });
+      _animationController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 300),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
+  /// @brief 切换抽屉状态
+  void _toggleDrawer() {
+    setState(() {
+      _isDrawerOpen = !_isDrawerOpen;
+      if (_isDrawerOpen) {
+        _animationController.forward();
+      } else {
+        _animationController.reverse();
+      }
+    });
+  }
+
+  /// @brief 关闭抽屉
+  void _closeDrawer() {
+    if (_isDrawerOpen) {
+      setState(() {
+        _isDrawerOpen = false;
+        _animationController.reverse();
+      });
+    }
+  }
+
+  List<Widget> _buildDrawerItems() {
+    if (_drawerItems != null) {
+      return _drawerItems!;
+    }
+
+    final historyList = widget._appConfig.history;
+    if (historyList.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Text(
+            '暂无历史记录',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: widget._appConfig.textStyle.fontSize,
+            ),
+          ),
+        ),
+      ];
+    }
+
+    return historyList.map<Widget>((item) {
+      final title = item["name"] ?? "未命名对话";
+      return ListTile(
+        leading: const Icon(Icons.chat, color: Color(0xFFB0BACA)),
+        title: Text(
+          title,
+          style: const TextStyle(color: Color(0xFFE0E4EA)),
+          overflow: TextOverflow.ellipsis,
+        ),
+        onTap: () {
+          _closeDrawer();
+          setState(() {
+            _historyName = item["name"] ?? "未命名对话";
+            _history = item["history"] ?? [];
+          });
+        },
+      );
+    }).toList();
+  }
+
+  void _sendMessage(String message) {
+    if (_historyName == "未命名对话") {
+      _historyName = message.length < 7 ? message : message.substring(0, 6);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    // 遮罩层（点击关闭）
+    Widget overlay = Positioned.fill(
+      child: FadeTransition(
+        opacity: _animationController,
+        child: IgnorePointer(
+          ignoring: !_isDrawerOpen, // 关闭时忽略点击，避免误触
+          child: GestureDetector(
+            onTap: _closeDrawer,
+            child: Container(color: Colors.black54),
+          ),
+        ),
+      ),
+    );
+
+    // 抽屉面板
+    Widget drawer = AnimatedPositioned(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      top: 0,
+      bottom: 0,
+      left: _isDrawerOpen ? 0 : -MediaQuery.of(context).size.width * 0.75,
+      width: MediaQuery.of(context).size.width * 0.75,
+      child: FadeTransition(
+        opacity: _animationController,
+        child: IgnorePointer(
+          ignoring: !_isDrawerOpen,
+          child: Material(
+            color: const Color.fromARGB(255, 234, 232, 232),
+            elevation: 8.0,
+            child: SafeArea(
+              child: Column(
+                children: [
+                  DrawerHeader(
+                    child: Text('历史对话', style: widget._appConfig.textStyle),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      padding: EdgeInsets.zero,
+                      children: _buildDrawerItems(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -61,7 +192,15 @@ class _ChatPageState extends State<ChatPage> {
           Flex(
             direction: Axis.vertical,
             children: [
-              Container(height: 60),
+              Container(
+                height: 60,
+                child: Center(
+                  child: Text(
+                    _historyName,
+                    style: widget._appConfig.textStyle,
+                  ),
+                ),
+              ),
               Divider(color: Colors.grey[100]),
               const SizedBox(height: 15),
               Expanded(
@@ -86,6 +225,7 @@ class _ChatPageState extends State<ChatPage> {
                   children: [
                     Expanded(
                       child: TextField(
+                        controller: _messageController,
                         decoration: InputDecoration(
                           hintText: "请输入",
                           border: OutlineInputBorder(
@@ -96,8 +236,15 @@ class _ChatPageState extends State<ChatPage> {
                     ),
                     const SizedBox(width: 20),
                     IconButton(
-                      onPressed: () {},
-                      icon: const Icon(Icons.send, size: 30),
+                      onPressed: () {
+                        if (_messageController.text.isNotEmpty) {
+                          _sendMessage(_messageController.text);
+                          _messageController.clear();
+                        } else {
+                          showAlertDialog(context, "输入不能为空!");
+                        }
+                      },
+                      icon: const Icon(Icons.send, size: 25),
                     ),
                   ],
                 ),
@@ -116,10 +263,12 @@ class _ChatPageState extends State<ChatPage> {
             top: 10,
             left: 0,
             child: IconButton(
-              onPressed: () {},
+              onPressed: _toggleDrawer,
               icon: Icon(Icons.history, size: 30),
             ),
           ),
+          overlay,
+          drawer,
         ],
       ),
     );
@@ -159,7 +308,7 @@ class _Bubble extends StatelessWidget {
                     child: Text(
                       _content,
                       style: TextStyle(
-                        color: const Color(0xFFFFFFFF), // 纯白文字
+                        color: const Color(0xFFFFFFFF),
                         fontSize: _appConfig.textStyle.fontSize,
                       ),
                     ),
