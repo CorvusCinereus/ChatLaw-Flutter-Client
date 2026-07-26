@@ -17,6 +17,7 @@ class ChatPage extends StatefulWidget {
   final String _serverName;
   final Function(PageIndex page, {String? serverName}) _setPage;
   final Function(Map<String, dynamic> history) _addHistory;
+  final Function(String name) _removeHistory;
 
   const ChatPage({
     super.key,
@@ -24,6 +25,7 @@ class ChatPage extends StatefulWidget {
     required this._serverName,
     required this._setPage,
     required this._addHistory,
+    required this._removeHistory,
   });
 
   @override
@@ -114,10 +116,95 @@ class _ChatPageState extends State<ChatPage>
       final title = item["name"] ?? "未命名对话";
       return ListTile(
         leading: const Icon(Icons.chat, color: Colors.black),
-        title: Text(
-          title,
-          style: const TextStyle(color: Colors.black),
-          overflow: TextOverflow.ellipsis,
+        title: Row(
+          spacing: 5,
+          children: [
+            Expanded(
+              child: Text(
+                title,
+                style: const TextStyle(color: Colors.black),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            PopupMenuButton(
+              child: IconButton(onPressed: null, icon: Icon(Icons.more_vert)),
+              itemBuilder: (BuildContext context) => <PopupMenuEntry>[
+                PopupMenuItem(
+                  value: 1,
+                  child: ListTile(
+                    leading: Icon(Icons.edit),
+                    title: Text("重命名对话", style: widget._appConfig.textStyle),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 2,
+                  child: ListTile(
+                    leading: Icon(Icons.delete),
+                    title: Text("删除对话", style: widget._appConfig.textStyle),
+                  ),
+                ),
+              ],
+              onSelected: (value) async {
+                if (value == 1) {
+                  final TextEditingController newNameController =
+                      TextEditingController();
+
+                  final String? newName = await showDialog<String>(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (BuildContext context) => AlertDialog(
+                      title: const Icon(Icons.edit),
+                      content: TextField(
+                        controller: newNameController,
+                        autofocus: true,
+                        decoration: const InputDecoration(
+                          hintText: "请输入新对话名称",
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (value) {
+                          Navigator.of(context).pop(value);
+                        },
+                      ),
+                      actions: [
+                        // 取消按钮
+                        TextButton(
+                          onPressed: () {
+                            Navigator.of(context).pop(); // 返回 null
+                          },
+                          child: const Text('取消'),
+                        ),
+                        // 确认按钮
+                        ElevatedButton(
+                          onPressed: () {
+                            // 点击确认时，将输入框的内容作为结果返回
+                            Navigator.of(context).pop(newNameController.text);
+                          },
+                          child: const Text('确定'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (newName != null) {
+                    setState(() {
+                      _historyName = newName;
+                      item["name"] = newName;
+                      widget._addHistory(item);
+                    });
+                  }
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    newNameController.dispose();
+                  });
+                } else if (value == 2) {
+                  setState(() {
+                    _history = [];
+                    _historyName = "未命名对话";
+                    widget._removeHistory(title);
+                    _closeDrawer();
+                  });
+                }
+              },
+            ),
+          ],
         ),
         onTap: () {
           _closeDrawer();
@@ -177,24 +264,54 @@ class _ChatPageState extends State<ChatPage>
               child: Column(
                 children: [
                   DrawerHeader(
-                    child: Column(
-                      children: [
-                        Text('历史对话', style: widget._appConfig.textStyle),
-                        const SizedBox(height: 10),
-                        ElevatedButton(
-                          onPressed: () {
-                            setState(() {
-                              _historyName = "未命名对话";
-                              _history = [];
-                            });
-                            _closeDrawer();
-                          },
-                          child: Text(
-                            "新对话",
-                            style: widget._appConfig.textStyle,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        spacing: 10,
+                        children: [
+                          Text('历史对话', style: widget._appConfig.textStyle),
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _historyName = "未命名对话";
+                                _history = [];
+                              });
+                              _closeDrawer();
+                            },
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                            ),
+                            child: Text(
+                              "新对话",
+                              style: widget._appConfig.textStyle,
+                            ),
                           ),
-                        ),
-                      ],
+                          TextButton(
+                            onPressed: () {
+                              widget._setPage(
+                                PageIndex.setting,
+                                serverName: widget._serverName,
+                              );
+                            },
+                            style: TextButton.styleFrom(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.settings),
+                                SizedBox(width: 5),
+                                Text("设置", style: widget._appConfig.textStyle),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                   Expanded(

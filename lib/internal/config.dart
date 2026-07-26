@@ -20,8 +20,11 @@ class AppConfig {
 
   AppConfig(this.textStyle, this.serverConfigs, this.history);
 
-  factory AppConfig.defaultConfig() =>
-      AppConfig(TextStyle(fontSize: Platform.isAndroid ? 14 : 19, color: Color(0xFF4A4A4A)), [], []);
+  factory AppConfig.defaultConfig() => AppConfig(
+    TextStyle(fontSize: Platform.isAndroid ? 14 : 19, color: Color(0xFF4A4A4A)),
+    [ServerConfig.defaultConfig()],
+    [],
+  );
 
   /// @brief 应用配置转换为 JSON 格式
   /// @return JSON 格式的应用配置
@@ -46,7 +49,9 @@ class AppConfig {
     return AppConfig(
       TextStyle(
         fontSize: textStyleData['font_size'] as double? ?? 19.0,
-        color: textStyleData['color'] != null ? Color(textStyleData['color']) : Color(0xFF4A4A4A),
+        color: textStyleData['color'] != null
+            ? Color(textStyleData['color'])
+            : Color(0xFF4A4A4A),
       ),
       serverConfigs
           .whereType<Map<String, dynamic>>()

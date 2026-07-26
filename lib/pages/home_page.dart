@@ -7,6 +7,7 @@
 import 'dart:convert';
 
 import 'package:chatlaw/pages/dialog.dart';
+import 'package:chatlaw/pages/setting_page.dart';
 import 'package:flutter/material.dart';
 import 'package:chatlaw/pages/start_page.dart';
 import 'package:chatlaw/pages/page_index.dart';
@@ -62,6 +63,7 @@ class _HomePageState extends State<HomePage> {
             serverName: serverName!,
             setPage: _setPage,
             addHistory: _addHistory,
+            removeHistory: _removeHistory,
           );
         });
         break;
@@ -76,6 +78,13 @@ class _HomePageState extends State<HomePage> {
         });
         break;
       case PageIndex.setting:
+        setState(() {
+          _body = SettingPage(
+            appConfig: _config!,
+            serverName: serverName,
+            setPage: _setPage,
+          );
+        });
         break;
     }
   }
@@ -126,8 +135,17 @@ class _HomePageState extends State<HomePage> {
   /// @brief 添加历史对话
   /// @param history 对话记录
   void _addHistory(Map<String, dynamic> history) {
-    _config!.history.removeWhere((element) => element["name"] == history["name"]);
+    _config!.history.removeWhere(
+      (element) => element["name"] == history["name"],
+    );
     _config!.history.add(history);
+    _saveConfig();
+  }
+
+  /// @brief 移除历史对话
+  /// @param name 对话名称
+  void _removeHistory(String name) {
+    _config!.history.removeWhere((element) => element["name"] == name);
     _saveConfig();
   }
 
