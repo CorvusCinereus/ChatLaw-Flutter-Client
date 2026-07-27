@@ -4,8 +4,6 @@
  * @author CorvusCinereus
  */
 
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 import 'package:chatlaw/internal/config.dart';
 import "package:flutter_chat_bubble/chat_bubble.dart";

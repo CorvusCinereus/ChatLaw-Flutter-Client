@@ -122,19 +122,3 @@ class _SettingPageState extends State<SettingPage> {
     );
   }
 }
-
-class _ServerSubPage extends StatefulWidget {
-  final AppConfig _appConfig;
-
-  const _ServerSubPage({required this._appConfig});
-
-  @override
-  State<_ServerSubPage> createState() => _ServerSubPageState();
-}
-
-class _ServerSubPageState extends State<_ServerSubPage> {
-  @override
-  Widget build(BuildContext context) {
-    return Container();
-  }
-}
