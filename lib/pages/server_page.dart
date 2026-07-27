@@ -7,18 +7,23 @@ import 'package:chatlaw/pages/dialog.dart';
 import 'package:chatlaw/internal/config.dart';
 import 'package:chatlaw/pages/page_index.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 class ServerPage extends StatefulWidget {
   final AppConfig config;
   final String? serverName;
+  final bool _subPage;
   final Function(String name, String address) addServer;
+  final Function(String name) removeServer;
   final Function(PageIndex page, {String? serverName}) setPage;
 
   const ServerPage({
     super.key,
     required this.config,
     this.serverName,
+    required this._subPage,
     required this.addServer,
+    required this.removeServer,
     required this.setPage,
   });
 
@@ -41,6 +46,9 @@ class _ServerPageState extends State<ServerPage> {
       if (index == -1) {
         showAlertDialog(context, "找不到服务器${widget.serverName}");
         widget.setPage(PageIndex.start);
+      } else {
+        _nameController.text = widget.config.serverConfigs[index].name;
+        _addressController.text = widget.config.serverConfigs[index].address;
       }
     }
   }
@@ -113,6 +121,23 @@ class _ServerPageState extends State<ServerPage> {
                         minimumSize: const Size.fromHeight(50),
                       ),
                       onPressed: () {
+                        if (_nameController.text.isEmpty ||
+                            _addressController.text.isEmpty) {
+                          showAlertDialog(context, "请完整输入服务器名称和地址");
+                          return;
+                        }
+                        if (widget.config.serverConfigs.isNotEmpty) {
+                          final index = widget.config.serverConfigs.indexWhere(
+                            (element) => element.name == _nameController.text,
+                          );
+                          if (index != -1 && !widget._subPage) {
+                            showAlertDialog(
+                              context,
+                              "服务器${_nameController.text}已存在",
+                            );
+                            return;
+                          }
+                        }
                         widget.addServer(
                           _nameController.text,
                           _addressController.text,
@@ -128,10 +153,22 @@ class _ServerPageState extends State<ServerPage> {
                       style: ElevatedButton.styleFrom(
                         minimumSize: const Size.fromHeight(50),
                       ),
-                      onPressed: () {
+                      onPressed: () async {
+                        if (widget._subPage &&
+                            await showAskDialog(
+                              context,
+                              "确定删除服务器${widget.serverName}吗？",
+                            )) {
+                          widget.removeServer(widget.serverName!);
+                        } else if (widget._subPage) {
+                          return;
+                        }
                         widget.setPage(PageIndex.start);
                       },
-                      child: Text('取消', style: widget.config.textStyle),
+                      child: Text(
+                        (widget._subPage) ? '删除' : '取消',
+                        style: widget.config.textStyle,
+                      ),
                     ),
                   ),
                 ],

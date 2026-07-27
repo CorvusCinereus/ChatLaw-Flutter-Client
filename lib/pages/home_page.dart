@@ -71,8 +71,10 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _body = ServerPage(
             config: _config!,
+            subPage: false,
             serverName: serverName,
             addServer: _addServer,
+            removeServer: _removeServer,
             setPage: _setPage,
           );
         });
@@ -82,6 +84,8 @@ class _HomePageState extends State<HomePage> {
           _body = SettingPage(
             appConfig: _config!,
             serverName: serverName,
+            addServer: _addServer,
+            removeServer: _removeServer,
             setPage: _setPage,
           );
         });
@@ -118,7 +122,18 @@ class _HomePageState extends State<HomePage> {
   /// @param address 服务器地址
   void _addServer(String name, String address) {
     if (name.isNotEmpty && address.isNotEmpty) {
-      _config!.serverConfigs.add(ServerConfig(name, address));
+      if (_config!.serverConfigs.isNotEmpty) {
+        final index = _config!.serverConfigs.indexWhere(
+          (element) => element.name == name,
+        );
+        if (index != -1) {
+          _config!.serverConfigs[index].address = address;
+        } else {
+          _config!.serverConfigs.add(ServerConfig(name, address));
+        }
+      } else {
+        _config!.serverConfigs.add(ServerConfig(name, address));
+      }
       _saveConfig();
     } else {
       showAlertDialog(context, "请完整填写配置信息", title: Icon(Icons.error));

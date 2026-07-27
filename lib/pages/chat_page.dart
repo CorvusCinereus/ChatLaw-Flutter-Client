@@ -304,8 +304,8 @@ class _ChatPageState extends State<ChatPage>
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.settings),
-                                SizedBox(width: 5),
+                                const Icon(Icons.settings, color: Colors.black),
+                                const SizedBox(width: 5),
                                 Text("设置", style: widget._appConfig.textStyle),
                               ],
                             ),
