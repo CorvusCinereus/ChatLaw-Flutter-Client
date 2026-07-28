@@ -113,6 +113,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "1.0.9"
+  dotted_border:
+    dependency: transitive
+    description:
+      name: dotted_border
+      sha256: "99b091ec6891ba0c5331fdc2b502993c7c108f898995739a73c6845d71dad70c"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "3.1.0"
   fake_async:
     dependency: transitive
     description:
@@ -488,6 +496,14 @@ packages:
       url: "https://pub.flutter-io.cn"
     source: hosted
     version: "1.12.1"
+  step_progress:
+    dependency: "direct main"
+    description:
+      name: step_progress
+      sha256: "05fafdf9969bc7abe6111c3b27722d1880875974b314bbce8536d65c82acefa5"
+      url: "https://pub.flutter-io.cn"
+    source: hosted
+    version: "2.7.1"
   stream_channel:
     dependency: transitive
     description:

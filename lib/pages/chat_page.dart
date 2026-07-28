@@ -9,6 +9,7 @@ import 'package:chatlaw/internal/config.dart';
 import "package:flutter_chat_bubble/chat_bubble.dart";
 import 'package:chatlaw/pages/dialog.dart';
 import 'package:chatlaw/pages/page_index.dart';
+import 'package:step_progress/step_progress.dart';
 
 class ChatPage extends StatefulWidget {
   final AppConfig _appConfig;
@@ -34,8 +35,10 @@ class _ChatPageState extends State<ChatPage>
     with SingleTickerProviderStateMixin {
   int _serverIndex = -1;
   String _historyName = "未命名对话";
+  bool _showDetail = false;
   List<Map<String, dynamic>> _history = [];
-  TextEditingController _messageController = TextEditingController();
+  final TextEditingController _messageController = TextEditingController();
+  StepProgressController? _stepProgressController;
 
   bool _isDrawerOpen = false;
   late AnimationController _animationController;
@@ -69,14 +72,16 @@ class _ChatPageState extends State<ChatPage>
 
   /// @brief 切换抽屉状态
   void _toggleDrawer() {
-    setState(() {
-      _isDrawerOpen = !_isDrawerOpen;
-      if (_isDrawerOpen) {
-        _animationController.forward();
-      } else {
-        _animationController.reverse();
-      }
-    });
+    if (!_showDetail) {
+      setState(() {
+        _isDrawerOpen = !_isDrawerOpen;
+        if (_isDrawerOpen) {
+          _animationController.forward();
+        } else {
+          _animationController.reverse();
+        }
+      });
+    }
   }
 
   /// @brief 关闭抽屉
@@ -192,7 +197,8 @@ class _ChatPageState extends State<ChatPage>
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     newNameController.dispose();
                   });
-                } else if (value == 2) {
+                } else if (value == 2 &&
+                    await showAskDialog(context, "是否删除该对话?")) {
                   setState(() {
                     _history = [];
                     _historyName = "未命名对话";
@@ -326,6 +332,61 @@ class _ChatPageState extends State<ChatPage>
       ),
     );
 
+    // 详情面板
+    Widget detail = AnimatedPositioned(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+      top: 20,
+      bottom: 20,
+      right: _showDetail ? 15 : -(MediaQuery.of(context).size.width),
+      width: MediaQuery.of(context).size.width - 70,
+      child: Stack(
+        children: [
+          Container(
+            height: double.infinity,
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Flex(
+              direction: Axis.vertical,
+              mainAxisAlignment: MainAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              spacing: 10,
+              children: [
+                const SizedBox(height: 30),
+                StepProgress(
+                  totalSteps: 4,
+                  nodeTitles: ["A", "B", "C", "D"],
+                  controller: _stepProgressController,
+                  theme: const StepProgressThemeData(
+                    nodeLabelAlignment: StepLabelAlignment.top,
+                    stepLineSpacing: 2,
+                    stepLineStyle: StepLineStyle(lineThickness: 2),
+                    activeForegroundColor: Colors.lightBlueAccent,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Positioned(
+            top: 5,
+            right: 10,
+            child: IconButton(
+              onPressed: () {
+                setState(() {
+                  _showDetail = false;
+                });
+              },
+              icon: const Icon(Icons.close),
+            ),
+          ),
+        ],
+      ),
+    );
+
     return Container(
       width: double.infinity,
       height: double.infinity,
@@ -395,7 +456,13 @@ class _ChatPageState extends State<ChatPage>
             top: 10,
             right: 0,
             child: IconButton(
-              onPressed: () {},
+              onPressed: () {
+                if (_stepProgressController != null) {
+                  setState(() {
+                    _showDetail = true;
+                  });
+                }
+              },
               icon: const Icon(Icons.list, size: 30),
             ),
           ),
@@ -409,6 +476,7 @@ class _ChatPageState extends State<ChatPage>
           ),
           overlay,
           drawer,
+          detail,
         ],
       ),
     );

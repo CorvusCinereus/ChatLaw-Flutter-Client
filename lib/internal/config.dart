@@ -16,12 +16,14 @@ class AppConfig {
   TextStyle textStyle;
   List<ServerConfig> serverConfigs;
   List<Map<String, dynamic>> history;
+  List<LawCache> lawCaches;
 
-  AppConfig(this.textStyle, this.serverConfigs, this.history);
+  AppConfig(this.textStyle, this.serverConfigs, this.history, this.lawCaches);
 
   factory AppConfig.defaultConfig() => AppConfig(
     TextStyle(fontSize: Platform.isAndroid ? 14 : 19, color: Color(0xFF4A4A4A)),
     [ServerConfig.defaultConfig()],
+    [],
     [],
   );
 
@@ -35,6 +37,7 @@ class AppConfig {
       },
       'server_configs': serverConfigs.map((e) => e.toJson()).toList(),
       'history': history,
+      'law_caches': lawCaches.map((e) => e.toJson()).toList(),
     };
   }
 
@@ -45,6 +48,7 @@ class AppConfig {
     final textStyleData = json['text_style'] as Map<String, dynamic>? ?? {};
     final serverConfigs = json['server_configs'] as List? ?? [];
     final history = json['history'] as List? ?? [];
+    final lawCaches = json['law_caches'] as List? ?? [];
     return AppConfig(
       TextStyle(
         fontSize: textStyleData['font_size'] as double? ?? 19.0,
@@ -56,7 +60,13 @@ class AppConfig {
           .whereType<Map<String, dynamic>>()
           .map((e) => ServerConfig.fromJson(e))
           .toList(),
-      history.whereType<Map<String, dynamic>>().toList(),
+      history
+          .whereType<Map<String, dynamic>>()
+          .toList(),
+      lawCaches
+          .whereType<Map<String, dynamic>>()
+          .map((e) => LawCache.fromJson(e))
+          .toList(),
     );
   }
 }
@@ -84,5 +94,23 @@ class ServerConfig {
       json['name'] as String? ?? '',
       json['address'] as String? ?? '',
     );
+  }
+}
+
+class LawCache {
+  String name;
+  List<String> laws;
+
+  LawCache(this.name, this.laws);
+
+  factory LawCache.fromJson(Map<String, dynamic> json) {
+    return LawCache(
+      json['name'] as String? ?? '',
+      json['laws'] as List<String>? ?? [],
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {'name': name, 'laws': laws};
   }
 }
