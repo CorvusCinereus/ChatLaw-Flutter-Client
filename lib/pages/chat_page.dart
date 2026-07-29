@@ -167,7 +167,7 @@ class _ChatPageState extends State<ChatPage>
                   final TextEditingController newNameController =
                       TextEditingController();
 
-                  final String? newName = await showDialog<String>(
+                  String? newName = await showDialog<String>(
                     context: context,
                     barrierDismissible: false,
                     builder: (BuildContext context) => AlertDialog(
@@ -203,8 +203,14 @@ class _ChatPageState extends State<ChatPage>
                     ),
                   );
                   if (newName != null) {
+                    if (widget._appConfig.history.indexWhere(
+                          (element) => element['name'] == newName,
+                        ) !=
+                        -1) {
+                      newName += '#';
+                    }
                     setState(() {
-                      widget._renameCache(_historyName, newName);
+                      widget._renameCache(_historyName, newName!);
                       _historyName = newName;
                       item["name"] = newName;
                       widget._addHistory(item);
@@ -257,7 +263,14 @@ class _ChatPageState extends State<ChatPage>
 
     setState(() {
       if (_historyName == "未命名对话") {
-        _historyName = message.length < 7 ? message : message.substring(0, 6);
+        String name = message.length < 7 ? message : message.substring(0, 6);
+        if (widget._appConfig.history.indexWhere(
+              (element) => element["name"] == name,
+            ) !=
+            -1) {
+          name += "#";
+        }
+        _historyName = name;
       }
       _history.add({"role": "user", "content": message});
       _showDetail = true;
