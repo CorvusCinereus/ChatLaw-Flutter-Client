@@ -106,18 +106,21 @@ class ServerConfig {
 class LawCache {
   String name;
   List<String> laws;
+  List<String> details;
 
-  LawCache(this.name, this.laws);
+  LawCache(this.name, this.laws, this.details);
 
   factory LawCache.fromJson(Map<String, dynamic> json) {
     final laws = json['laws'] as List? ?? [];
+    final details = json['details'] as List? ?? [];
     return LawCache(
       json['name'] as String? ?? '',
       laws.whereType<String>().toList(),
+      details.whereType<String>().toList(),
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {'name': name, 'laws': laws};
+    return {'name': name, 'laws': laws, 'details': details};
   }
 }
