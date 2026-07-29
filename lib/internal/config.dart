@@ -38,6 +38,7 @@ class AppConfig {
       'text_style': {
         'font_size': textStyle.fontSize,
         'color': textStyle.color?.toARGB32() ?? Colors.black.toARGB32(),
+        'font_family': textStyle.fontFamily,
       },
       'server_configs': serverConfigs.map((e) => e.toJson()).toList(),
       'history': history,
@@ -59,6 +60,9 @@ class AppConfig {
         color: textStyleData['color'] != null
             ? Color(textStyleData['color'])
             : Color(0xFF4A4A4A),
+        fontFamily:
+            textStyleData['font_family'] as String? ??
+            (Platform.isWindows ? '微软雅黑' : null),
       ),
       serverConfigs
           .whereType<Map<String, dynamic>>()

@@ -37,8 +37,11 @@ class _ChatPageState extends State<ChatPage>
   String _historyName = "未命名对话";
   bool _showDetail = false;
   List<Map<String, dynamic>> _history = [];
+  List<String> _caches = [];
   final TextEditingController _messageController = TextEditingController();
-  StepProgressController? _stepProgressController;
+  final StepProgressController _stepProgressController = StepProgressController(
+    totalSteps: 4,
+  );
 
   bool _isDrawerOpen = false;
   late AnimationController _animationController;
@@ -51,7 +54,11 @@ class _ChatPageState extends State<ChatPage>
       (element) => element.name == widget._serverName,
     );
     if (_serverIndex == -1) {
-      showAlertDialog(context, "服务器不存在");
+      showAlertDialog(
+        context,
+        "服务器不存在",
+        textStyle: widget._appConfig.textStyle,
+      );
       widget._setPage(PageIndex.start);
     } else {
       setState(() {
@@ -135,14 +142,14 @@ class _ChatPageState extends State<ChatPage>
                 PopupMenuItem(
                   value: 1,
                   child: ListTile(
-                    leading: Icon(Icons.edit),
+                    leading: const Icon(Icons.edit),
                     title: Text("重命名对话", style: widget._appConfig.textStyle),
                   ),
                 ),
                 PopupMenuItem(
                   value: 2,
                   child: ListTile(
-                    leading: Icon(Icons.delete),
+                    leading: const Icon(Icons.delete),
                     title: Text("删除对话", style: widget._appConfig.textStyle),
                   ),
                 ),
@@ -224,11 +231,14 @@ class _ChatPageState extends State<ChatPage>
   }
 
   void _sendMessage(String message) {
+    _stepProgressController.setCurrentStep(-1);
     setState(() {
       if (_historyName == "未命名对话") {
         _historyName = message.length < 7 ? message : message.substring(0, 6);
       }
       _history.add({"role": "user", "content": message});
+      _showDetail = true;
+      _startProgress();
     });
     widget._addHistory({"name": _historyName, "history": _history});
   }
@@ -368,6 +378,7 @@ class _ChatPageState extends State<ChatPage>
                     activeForegroundColor: Colors.lightBlueAccent,
                   ),
                 ),
+                // ListView.separated()
               ],
             ),
           ),
@@ -442,7 +453,11 @@ class _ChatPageState extends State<ChatPage>
                           _sendMessage(_messageController.text);
                           _messageController.clear();
                         } else {
-                          showAlertDialog(context, "输入不能为空!");
+                          showAlertDialog(
+                            context,
+                            "输入不能为空!",
+                            textStyle: widget._appConfig.textStyle,
+                          );
                         }
                       },
                       icon: const Icon(Icons.send, size: 25),
@@ -457,11 +472,9 @@ class _ChatPageState extends State<ChatPage>
             right: 0,
             child: IconButton(
               onPressed: () {
-                if (_stepProgressController != null) {
-                  setState(() {
-                    _showDetail = true;
-                  });
-                }
+                setState(() {
+                  _showDetail = true;
+                });
               },
               icon: const Icon(Icons.list, size: 30),
             ),
@@ -471,7 +484,7 @@ class _ChatPageState extends State<ChatPage>
             left: 0,
             child: IconButton(
               onPressed: _toggleDrawer,
-              icon: Icon(Icons.history, size: 30),
+              icon: const Icon(Icons.history, size: 30),
             ),
           ),
           overlay,
@@ -480,6 +493,17 @@ class _ChatPageState extends State<ChatPage>
         ],
       ),
     );
+  }
+
+  Future<void> _startProgress() async {
+    await Future.delayed(Duration(seconds: 1));
+    _stepProgressController.nextStep();
+    await Future.delayed(Duration(seconds: 1));
+    _stepProgressController.nextStep();
+    await Future.delayed(Duration(seconds: 1));
+    _stepProgressController.nextStep();
+    await Future.delayed(Duration(seconds: 1));
+    _stepProgressController.nextStep();
   }
 }
 

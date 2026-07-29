@@ -10,6 +10,7 @@ Future<void> showAlertDialog(
   BuildContext context,
   String content, {
   Widget? title,
+  TextStyle? textStyle,
 }) async {
   return showDialog<void>(
     context: context,
@@ -17,7 +18,7 @@ Future<void> showAlertDialog(
     builder: (BuildContext context) {
       return AlertDialog(
         title: title ?? const Icon(Icons.warning),
-        content: SingleChildScrollView(child: Text(content)),
+        content: SingleChildScrollView(child: Text(content, style: textStyle)),
         actions: [
           TextButton(
             child: const Text("确定"),
@@ -58,4 +59,3 @@ Future<bool> showAskDialog(
       ) ??
       false; // 若用户点击外部关闭（且 barrierDismissible 为 true）或返回 null，默认返回 false
 }
-

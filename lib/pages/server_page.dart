@@ -44,7 +44,11 @@ class _ServerPageState extends State<ServerPage> {
         (element) => element.name == widget.serverName,
       );
       if (index == -1) {
-        showAlertDialog(context, "找不到服务器${widget.serverName}");
+        showAlertDialog(
+          context,
+          "找不到服务器${widget.serverName}",
+          textStyle: widget.config.textStyle,
+        );
         widget.setPage(PageIndex.start);
       } else {
         _nameController.text = widget.config.serverConfigs[index].name;
@@ -123,7 +127,11 @@ class _ServerPageState extends State<ServerPage> {
                       onPressed: () {
                         if (_nameController.text.isEmpty ||
                             _addressController.text.isEmpty) {
-                          showAlertDialog(context, "请完整输入服务器名称和地址");
+                          showAlertDialog(
+                            context,
+                            "请完整输入服务器名称和地址",
+                            textStyle: widget.config.textStyle,
+                          );
                           return;
                         }
                         if (widget.config.serverConfigs.isNotEmpty) {
@@ -134,6 +142,7 @@ class _ServerPageState extends State<ServerPage> {
                             showAlertDialog(
                               context,
                               "服务器${_nameController.text}已存在",
+                              textStyle: widget.config.textStyle,
                             );
                             return;
                           }

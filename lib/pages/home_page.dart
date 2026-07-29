@@ -112,7 +112,11 @@ class _HomePageState extends State<HomePage> {
       }
     } catch (e) {
       _config = AppConfig.defaultConfig();
-      showAlertDialog(context, "配置文件损坏，请重新配置服务器\n$e");
+      showAlertDialog(
+        context,
+        "配置文件损坏，请重新配置服务器\n$e",
+        textStyle: _config?.textStyle,
+      );
     }
     _setPage(PageIndex.start);
   }
@@ -136,7 +140,12 @@ class _HomePageState extends State<HomePage> {
       }
       _saveConfig();
     } else {
-      showAlertDialog(context, "请完整填写配置信息", title: Icon(Icons.error));
+      showAlertDialog(
+        context,
+        "请完整填写配置信息",
+        title: const Icon(Icons.error),
+        textStyle: _config?.textStyle,
+      );
     }
   }
 
