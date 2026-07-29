@@ -21,7 +21,11 @@ class AppConfig {
   AppConfig(this.textStyle, this.serverConfigs, this.history, this.lawCaches);
 
   factory AppConfig.defaultConfig() => AppConfig(
-    TextStyle(fontSize: Platform.isAndroid ? 14 : 19, color: Color(0xFF4A4A4A)),
+    TextStyle(
+      fontSize: Platform.isAndroid ? 14 : 19,
+      color: const Color(0xFF4A4A4A),
+      fontFamily: Platform.isWindows ? '微软雅黑' : null,
+    ),
     [ServerConfig.defaultConfig()],
     [],
     [],
@@ -60,9 +64,7 @@ class AppConfig {
           .whereType<Map<String, dynamic>>()
           .map((e) => ServerConfig.fromJson(e))
           .toList(),
-      history
-          .whereType<Map<String, dynamic>>()
-          .toList(),
+      history.whereType<Map<String, dynamic>>().toList(),
       lawCaches
           .whereType<Map<String, dynamic>>()
           .map((e) => LawCache.fromJson(e))
