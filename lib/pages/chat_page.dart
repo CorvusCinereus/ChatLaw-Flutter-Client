@@ -407,6 +407,7 @@ class _ChatPageState extends State<ChatPage>
                 const SizedBox(height: 30),
                 StepProgress(
                   totalSteps: 4,
+                  stepNodeSize: 20,
                   nodeTitles: ["RAG检索", "构建提示词", "分词", "推理"],
                   controller: _stepProgressController,
                   theme: const StepProgressThemeData(
