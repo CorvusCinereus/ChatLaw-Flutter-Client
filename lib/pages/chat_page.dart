@@ -17,6 +17,8 @@ class ChatPage extends StatefulWidget {
   final Function(PageIndex page, {String? serverName}) _setPage;
   final Function(Map<String, dynamic> history) _addHistory;
   final Function(String name) _removeHistory;
+  final Function(LawCache cache) _addCache;
+  final Function(String oldName, String newName) _renameCache;
 
   const ChatPage({
     super.key,
@@ -25,6 +27,8 @@ class ChatPage extends StatefulWidget {
     required this._setPage,
     required this._addHistory,
     required this._removeHistory,
+    required this._addCache,
+    required this._renameCache,
   });
 
   @override
@@ -137,7 +141,10 @@ class _ChatPageState extends State<ChatPage>
               ),
             ),
             PopupMenuButton(
-              child: IconButton(onPressed: null, icon: Icon(Icons.more_vert)),
+              child: IconButton(
+                onPressed: null,
+                icon: const Icon(Icons.more_vert, color: Colors.black),
+              ),
               itemBuilder: (BuildContext context) => <PopupMenuEntry>[
                 PopupMenuItem(
                   value: 1,
@@ -196,6 +203,7 @@ class _ChatPageState extends State<ChatPage>
                   );
                   if (newName != null) {
                     setState(() {
+                      widget._renameCache(_historyName, newName);
                       _historyName = newName;
                       item["name"] = newName;
                       widget._addHistory(item);
@@ -224,6 +232,17 @@ class _ChatPageState extends State<ChatPage>
             _history = (item["history"] as List? ?? [])
                 .whereType<Map<String, dynamic>>()
                 .toList();
+
+            // 加载缓存
+            final index = widget._appConfig.lawCaches.indexWhere(
+              (element) => element.name == _historyName,
+            );
+            if (index != -1) {
+              _caches = widget._appConfig.lawCaches[index].laws;
+              if (_caches.isNotEmpty) {
+                _stepProgressController.setCurrentStep(3);
+              }
+            }
           });
         },
       );
@@ -231,7 +250,7 @@ class _ChatPageState extends State<ChatPage>
   }
 
   void _sendMessage(String message) {
-    _stepProgressController.setCurrentStep(-1);
+    _stepProgressController.setCurrentStep(-1); // 重置进度条
     setState(() {
       if (_historyName == "未命名对话") {
         _historyName = message.length < 7 ? message : message.substring(0, 6);
@@ -288,6 +307,8 @@ class _ChatPageState extends State<ChatPage>
                               setState(() {
                                 _historyName = "未命名对话";
                                 _history = [];
+                                _caches = [];
+                                _stepProgressController.setCurrentStep(-1);
                               });
                               _closeDrawer();
                             },
@@ -369,7 +390,7 @@ class _ChatPageState extends State<ChatPage>
                 const SizedBox(height: 30),
                 StepProgress(
                   totalSteps: 4,
-                  nodeTitles: ["A", "B", "C", "D"],
+                  nodeTitles: ["RAG检索", "构建提示词", "分词", "推理"],
                   controller: _stepProgressController,
                   theme: const StepProgressThemeData(
                     nodeLabelAlignment: StepLabelAlignment.top,
@@ -472,9 +493,11 @@ class _ChatPageState extends State<ChatPage>
             right: 0,
             child: IconButton(
               onPressed: () {
-                setState(() {
-                  _showDetail = true;
-                });
+                if (_stepProgressController.currentStep != -1) {
+                  setState(() {
+                    _showDetail = true;
+                  });
+                }
               },
               icon: const Icon(Icons.list, size: 30),
             ),
@@ -504,6 +527,11 @@ class _ChatPageState extends State<ChatPage>
     _stepProgressController.nextStep();
     await Future.delayed(Duration(seconds: 1));
     _stepProgressController.nextStep();
+
+    _caches.add("法律条文1");
+    _caches.add("法律条文2");
+
+    widget._addCache(LawCache(_historyName, _caches));
   }
 }
 

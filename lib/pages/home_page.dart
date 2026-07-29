@@ -64,6 +64,8 @@ class _HomePageState extends State<HomePage> {
             setPage: _setPage,
             addHistory: _addHistory,
             removeHistory: _removeHistory,
+            addCache: _addCache,
+            renameCache: _renameCache,
           );
         });
         break;
@@ -170,6 +172,26 @@ class _HomePageState extends State<HomePage> {
   /// @param name 对话名称
   void _removeHistory(String name) {
     _config!.history.removeWhere((element) => element["name"] == name);
+    _config!.lawCaches.removeWhere((element) => element.name == name);
+    _saveConfig();
+  }
+
+  /// @brief 添加检索缓存
+  /// @param cache 缓存
+  void _addCache(LawCache cache) {
+    _config!.lawCaches.removeWhere((element) => element.name == cache.name);
+    _config!.lawCaches.add(cache);
+    _saveConfig();
+  }
+
+  /// @brief 重命名检索缓存
+  /// @param oldName 旧的缓存名称
+  /// @param newName 新的缓存名称
+  void _renameCache(String oldName, String newName) {
+    final index = _config!.lawCaches.indexWhere(
+      (element) => element.name == oldName,
+    );
+    _config!.lawCaches[index].name = newName;
     _saveConfig();
   }
 

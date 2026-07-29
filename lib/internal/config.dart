@@ -110,9 +110,10 @@ class LawCache {
   LawCache(this.name, this.laws);
 
   factory LawCache.fromJson(Map<String, dynamic> json) {
+    final laws = json['laws'] as List? ?? [];
     return LawCache(
       json['name'] as String? ?? '',
-      json['laws'] as List<String>? ?? [],
+      laws.whereType<String>().toList(),
     );
   }
 
