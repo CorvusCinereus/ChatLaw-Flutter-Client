@@ -4,6 +4,7 @@
  * @author CorvusCinereus
  */
 
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:chatlaw/internal/config.dart';
 import "package:flutter_chat_bubble/chat_bubble.dart";
@@ -40,6 +41,7 @@ class _ChatPageState extends State<ChatPage>
   int _serverIndex = -1;
   String _historyName = "未命名对话";
   bool _showDetail = false;
+  bool _recording = false;
   List<Map<String, dynamic>> _history = [];
   List<String> _caches = [];
   List<String> _details = [];
@@ -500,8 +502,30 @@ class _ChatPageState extends State<ChatPage>
                 ),
                 child: Row(
                   children: [
+                    IconButton(
+                      onPressed: () {
+                        if (!_recording) {
+                          setState(() {
+                            _recording = true;
+                          });
+                        } else {
+                          setState(() {
+                            _recording = false;
+                          });
+
+                          // TODO: 语音转文本
+                          _sendMessage("一段语音...");
+                        }
+                      },
+                      icon: Icon(
+                        _recording ? Icons.stop : Icons.mic,
+                        color: _recording ? Colors.red : Colors.black,
+                      ),
+                    ),
+                    const SizedBox(width: 20),
                     Expanded(
                       child: TextField(
+                        enabled: !_recording,
                         controller: _messageController,
                         decoration: InputDecoration(
                           hintText: "请输入",
