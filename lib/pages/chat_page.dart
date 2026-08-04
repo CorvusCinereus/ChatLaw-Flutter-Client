@@ -4,12 +4,16 @@
  * @author CorvusCinereus
  */
 
+import 'dart:io';
+
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:chatlaw/internal/config.dart';
 import "package:flutter_chat_bubble/chat_bubble.dart";
 import 'package:chatlaw/pages/dialog.dart';
 import 'package:chatlaw/pages/page_index.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:record/record.dart';
 import 'package:step_progress/step_progress.dart';
 
 class ChatPage extends StatefulWidget {
@@ -53,6 +57,7 @@ class _ChatPageState extends State<ChatPage>
   bool _isDrawerOpen = false;
   late AnimationController _animationController;
   List<Widget>? _drawerItems;
+  AudioRecorder? _record;
 
   @override
   void initState() {
@@ -80,6 +85,7 @@ class _ChatPageState extends State<ChatPage>
 
   @override
   void dispose() {
+    _record?.dispose();
     _animationController.dispose();
     super.dispose();
   }
@@ -279,6 +285,38 @@ class _ChatPageState extends State<ChatPage>
       _startProgress();
     });
     widget._addHistory({"name": _historyName, "history": _history});
+  }
+
+  void _startRecord() async {
+    try {
+      _record = AudioRecorder();
+      final dir = await getApplicationCacheDirectory();
+      final outputPath = "${dir.path}/output.wav";
+      if (await _record!.hasPermission()) {
+        await _record!.start(
+          const RecordConfig(encoder: AudioEncoder.wav),
+          path: outputPath,
+        );
+      } else {
+        showAlertDialog(
+          context,
+          "没有录音权限!",
+          title: Icon(Icons.error),
+          textStyle: widget._appConfig.textStyle,
+        );
+      }
+    } catch (e) {
+      showAlertDialog(
+        context,
+        "启动录音失败: $e",
+        title: Icon(Icons.error),
+        textStyle: widget._appConfig.textStyle,
+      );
+    }
+  }
+
+  void _stopRecord() async {
+    final _ = _record!.stop();
   }
 
   @override
@@ -508,10 +546,12 @@ class _ChatPageState extends State<ChatPage>
                           setState(() {
                             _recording = true;
                           });
+                          _startRecord();
                         } else {
                           setState(() {
                             _recording = false;
                           });
+                          _stopRecord();
 
                           // TODO: 语音转文本
                           _sendMessage("一段语音...");
