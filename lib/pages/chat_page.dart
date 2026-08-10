@@ -4,9 +4,10 @@
  * @author CorvusCinereus
  */
 
-import 'dart:io';
-
+import 'dart:io' show File, Platform;
+import 'package:dio/dio.dart';
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:chatlaw/internal/config.dart';
 import "package:flutter_chat_bubble/chat_bubble.dart";
@@ -294,7 +295,12 @@ class _ChatPageState extends State<ChatPage>
       final outputPath = "${dir.path}/output.wav";
       if (await _record!.hasPermission()) {
         await _record!.start(
-          const RecordConfig(encoder: AudioEncoder.wav),
+          const RecordConfig(
+            encoder: AudioEncoder.wav,
+            sampleRate: 16000,
+            numChannels: 1,
+            bitRate: 256000,
+          ),
           path: outputPath,
         );
       } else {
@@ -316,7 +322,129 @@ class _ChatPageState extends State<ChatPage>
   }
 
   void _stopRecord() async {
-    final _ = _record!.stop();
+    final _ = await _record!.stop();
+  }
+
+  Future<String?> _voiceToText() async {
+    final Map<String, String> envVars = Platform.environment;
+    final apiKey = envVars['CHATLAW_VOICE_API_KEY'];
+    final secretKey = envVars['CHATLAW_VOICE_SECRET_KEY'];
+
+    final cuid = widget._appConfig.uuid;
+    final int devPid = 1537;
+    final dir = await getApplicationCacheDirectory();
+    final pcmFilePath = "${dir.path}/output.wav";
+    final dio = Dio();
+
+    try {
+      final tokenResponse = await dio.post(
+        'http://aip.baidubce.com/oauth/2.0/token',
+        data: {
+          'grant_type': 'client_credentials',
+          'client_id': apiKey,
+          'client_secret': secretKey,
+        },
+        options: Options(contentType: 'application/x-www-form-urlencoded'),
+      );
+
+      final tokenData = tokenResponse.data;
+
+      if (!tokenData.containsKey('access_token')) {
+        showAlertDialog(
+          context,
+          '获取 Token 失败：${tokenData}',
+          title: const Icon(Icons.error),
+          textStyle: widget._appConfig.textStyle,
+        );
+        return "";
+      }
+
+      final String token = tokenData['access_token'];
+
+      final File audioFile = File(pcmFilePath);
+      if (!await audioFile.exists()) {
+        showAlertDialog(
+          context,
+          '文件不存在：$pcmFilePath',
+          title: const Icon(Icons.error),
+          textStyle: widget._appConfig.textStyle,
+        );
+        return "";
+      }
+
+      // 获取文件大小
+      Uint8List speechData = await audioFile.readAsBytes();
+
+      final int length = speechData.length;
+
+      final Map<String, dynamic> queryParams = {
+        'cuid': cuid,
+        'token': token,
+        'dev_pid': devPid,
+      };
+
+      final Map<String, dynamic> headers = {
+        'Content-Type': 'audio/pcm; rate=16000',
+        'Content-Length': length,
+      };
+
+      final stopwatch = Stopwatch()..start();
+
+      final response = await dio.post(
+        'http://vop.baidu.com/server_api',
+        queryParameters: queryParams,
+        data: speechData,
+        options: Options(
+          headers: headers,
+          sendTimeout: const Duration(seconds: 30),
+          receiveTimeout: const Duration(seconds: 30),
+        ),
+      );
+
+      stopwatch.stop();
+
+      final result = response.data;
+      final int errNo = result['err_no'] ?? -1;
+
+      if (errNo == 0) {
+        final List? resultList = result['result'];
+
+        if (resultList != null && resultList.isNotEmpty) {
+          final String recognizedText = resultList[0].toString();
+          return recognizedText;
+        } else {
+          showAlertDialog(
+            context,
+            '识别结果为空',
+            title: const Icon(Icons.error),
+            textStyle: widget._appConfig.textStyle,
+          );
+        }
+      } else {
+        final String errMsg = result['err_msg'] ?? '未知错误';
+        showAlertDialog(
+          context,
+          '识别失败：$errMsg (错误码: $errNo)',
+          title: const Icon(Icons.error),
+          textStyle: widget._appConfig.textStyle,
+        );
+      }
+    } on DioException catch (e) {
+      showAlertDialog(
+        context,
+        '网络请求失败：${e.message}',
+        title: const Icon(Icons.error),
+        textStyle: widget._appConfig.textStyle,
+      );
+    } catch (e) {
+      showAlertDialog(
+        context,
+        '未知错误',
+        title: const Icon(Icons.error),
+        textStyle: widget._appConfig.textStyle,
+      );
+    }
+    return null;
   }
 
   @override
@@ -541,7 +669,7 @@ class _ChatPageState extends State<ChatPage>
                 child: Row(
                   children: [
                     IconButton(
-                      onPressed: () {
+                      onPressed: () async {
                         if (!_recording) {
                           setState(() {
                             _recording = true;
@@ -553,8 +681,11 @@ class _ChatPageState extends State<ChatPage>
                           });
                           _stopRecord();
 
-                          // TODO: 语音转文本
-                          _sendMessage("一段语音...");
+                          final message = await _voiceToText();
+
+                          if (message != null) {
+                            _sendMessage(message);
+                          }
                         }
                       },
                       icon: Icon(

@@ -6,6 +6,7 @@
 
 import 'dart:io' show Platform;
 import 'package:flutter/material.dart';
+import 'package:uuid/v1.dart';
 
 /**
  * @class AppConfig
@@ -13,14 +14,22 @@ import 'package:flutter/material.dart';
  * @author CorvusCinereus
  */
 class AppConfig {
+  String uuid;
   TextStyle textStyle;
   List<ServerConfig> serverConfigs;
   List<Map<String, dynamic>> history;
   List<LawCache> lawCaches;
 
-  AppConfig(this.textStyle, this.serverConfigs, this.history, this.lawCaches);
+  AppConfig(
+    this.uuid,
+    this.textStyle,
+    this.serverConfigs,
+    this.history,
+    this.lawCaches,
+  );
 
   factory AppConfig.defaultConfig() => AppConfig(
+    UuidV1().generate(),
     TextStyle(
       fontSize: Platform.isAndroid ? 14 : 19,
       color: const Color(0xFF4A4A4A),
@@ -35,6 +44,7 @@ class AppConfig {
   /// @return JSON 格式的应用配置
   Map<String, dynamic> toJson() {
     return {
+      'uuid': uuid,
       'text_style': {
         'font_size': textStyle.fontSize,
         'color': textStyle.color?.toARGB32() ?? Colors.black.toARGB32(),
@@ -50,11 +60,13 @@ class AppConfig {
   /// @param json JSON 格式的应用配置
   /// @return 应用配置实例
   factory AppConfig.fromJson(Map<String, dynamic> json) {
+    final uuid = json['uuid'] as String? ?? UuidV1().generate();
     final textStyleData = json['text_style'] as Map<String, dynamic>? ?? {};
     final serverConfigs = json['server_configs'] as List? ?? [];
     final history = json['history'] as List? ?? [];
     final lawCaches = json['law_caches'] as List? ?? [];
     return AppConfig(
+      uuid,
       TextStyle(
         fontSize: textStyleData['font_size'] as double? ?? 19.0,
         color: textStyleData['color'] != null
