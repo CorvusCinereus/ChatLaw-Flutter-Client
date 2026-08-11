@@ -1,0 +1,24 @@
+# ChatLaw 客户端独立模块依赖（chatlaw-flutter-client/python/）
+# 适用于 asr.py、rag.py、build.py、tokenize.py 四个模块
+# 仅包含运行必需的包；gradio / markdown / pyside6 / jieba 等其余客户端依赖不在其中。
+# 说明：
+#   - torch 由 transformers 与 sentence-transformers 自动携带，无需单独声明。
+#   - 资源懒加载下载逻辑已内嵌在各模块中（openi 延迟导入），openi 仍需显式安装。
+
+# —— asr.py：语音转文字（Paraformer ASR）——
+numpy
+soundfile
+librosa
+funasr_onnx
+
+# —— rag.py：知识库检索（FAISS + 精确索引混合检索）——
+langchain-community
+langchain-huggingface
+faiss-cpu              # langchain_community 的 FAISS 模块必需，未被其依赖自动携带
+sentence-transformers  # HuggingFaceEmbeddings 必需，langchain-huggingface 仅在 full extra 中携带
+
+# —— tokenize.py：分词（Qwen3 chat template）——
+transformers
+
+# —— 通用：资源懒加载下载（openi 延迟导入于各模块 _download_*）——
+openi
