@@ -4,7 +4,7 @@
 将客户端流水线中的「语音转文字」环节整理为独立模块：
 - 所需函数原样搬入本文件，不依赖原 ChatLaw 仓库代码，可独立运行。
 - 资源（Paraformer 语音模型）采用首次调用 run() 时懒加载并缓存，
-  缺失时通过启智社区（openi）自动下载到 <仓库根>/resources/。
+  缺失时通过启智社区（openi）自动下载到资源根目录（APPDATA_DIR 或回退的 <仓库根>/resources/）。
 - 对外只暴露一个统一入口 run()，一次调用即可完成整个 ASR 环节。
 """
 
@@ -24,9 +24,13 @@ TARGET_SR = 16000
 
 def _get_resources_path():
     """
-    返回资源目录。
-    本文件位于 <仓库根>/python/，资源约定放在 <仓库根>/resources/。
+    返回资源根目录。
+    优先读取环境变量 APPDATA_DIR（由宿主 APP 传入）；
+    未设置时回退到 <仓库根>/resources，便于独立运行与测试。
     """
+    base = os.getenv("APPDATA_DIR")
+    if base:
+        return base
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "resources",
@@ -53,7 +57,8 @@ def _files_complete(resource_dir, required_files):
 
 def _download_audio_model():
     """
-    从启智社区（openi）下载 Paraformer 语音模型到 resources/audio_model。
+    从启智社区（openi）下载 Paraformer 语音模型到资源根目录下的 audio_model 子目录
+    （{APPDATA_DIR}/audio_model）。
     仅在文件不齐全时执行；openi 采用函数内延迟导入，避免模块 import 即依赖。
     """
     audio_model_dir = os.path.join(_get_resources_path(), "audio_model")

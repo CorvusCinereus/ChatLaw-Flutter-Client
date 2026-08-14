@@ -4,6 +4,8 @@
 # 说明：
 #   - torch 由 transformers 与 sentence-transformers 自动携带，无需单独声明。
 #   - 资源懒加载下载逻辑已内嵌在各模块中（openi 延迟导入），openi 仍需显式安装。
+#   - 资源根目录由环境变量 APPDATA_DIR 指定（宿主 APP 启动 Python 进程前传入），
+#     未设置时回退到仓库根目录下 resources/。
 
 # —— asr.py：语音转文字（Paraformer ASR）——
 numpy

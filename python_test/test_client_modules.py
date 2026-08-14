@@ -38,7 +38,9 @@ if REPO_ROOT not in sys.path:
 # python/ 为包（含 __init__.py），模块以 python.xxx 命名空间导入，
 # 避免 asr/rag/build/tokenize 等顶层模块名遮蔽标准库（如 tokenize）。
 PYTHON_DIR = os.path.join(REPO_ROOT, "python")
-RESOURCES_DIR = os.path.join(REPO_ROOT, "resources")
+# 资源根目录：优先读取环境变量 APPDATA_DIR（由宿主 APP 传入），
+# 未设置时回退到仓库内 resources/（与各模块 _get_resources_path 保持一致）。
+RESOURCES_DIR = os.getenv("APPDATA_DIR") or os.path.join(REPO_ROOT, "resources")
 
 # ============================================================
 # 极简测试框架：显式 PASS / FAIL / SKIP 输出
@@ -81,6 +83,7 @@ print(f"  Python 解释器: {sys.executable}")
 print(f"  Python 版本  : {sys.version.split()[0]}")
 print(f"  python 模块目录: {PYTHON_DIR}")
 print(f"  资源目录      : {RESOURCES_DIR}")
+print(f"  APPDATA_DIR   : {os.getenv('APPDATA_DIR') or '（未设置，使用回退路径）'}")
 
 # ============================================================
 # 1. 模块导入

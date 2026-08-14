@@ -5,7 +5,7 @@
 - 所需逻辑（tokenizer 加载、chat 模板套用、分词）原样搬入本文件，
   不依赖原 ChatLaw 仓库代码，可独立运行。
 - 资源（tokenizer）采用首次调用 run() 时懒加载并缓存，
-  缺失时通过启智社区（openi）自动下载到 <仓库根>/resources/。
+  缺失时通过启智社区（openi）自动下载到资源根目录（APPDATA_DIR 或回退的 <仓库根>/resources/）。
 - 对外只暴露一个统一入口 run()，一次调用即可完成整个分词环节。
 
 注：pt 客户端使用 PyTorch 张量（return_tensors="pt"），
@@ -19,9 +19,13 @@ from transformers import AutoTokenizer
 
 def _get_resources_path():
     """
-    返回资源目录。
-    本文件位于 <仓库根>/python/，资源约定放在 <仓库根>/resources/。
+    返回资源根目录。
+    优先读取环境变量 APPDATA_DIR（由宿主 APP 传入）；
+    未设置时回退到 <仓库根>/resources，便于独立运行与测试。
     """
+    base = os.getenv("APPDATA_DIR")
+    if base:
+        return base
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "resources",
@@ -49,7 +53,7 @@ def _files_complete(resource_dir, required_files):
 def _download_tokenizer():
     """
     从启智社区（openi）下载 Qwen3 tokenizer。
-    与原实现一致，tokenizer 文件下载到 resources/ 根目录；
+    与原实现一致，tokenizer 文件下载到资源根目录（{APPDATA_DIR}/）；
     仅在文件不齐全时执行；openi 采用函数内延迟导入。
     """
     tokenizer_dir = os.path.join(_get_resources_path(), "tokenizer")
