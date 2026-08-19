@@ -11,6 +11,8 @@
 import os
 import re
 import json
+import sys
+import time
 
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
@@ -29,6 +31,13 @@ def _get_resources_path():
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "resources",
     )
+
+
+def _get_pipeline_dir():
+    """
+    返回流水线输出子目录：{资源根}/pipeline。
+    """
+    return os.path.join(_get_resources_path(), "pipeline")
 
 
 _VECTORSTORE_FILES = [
@@ -341,32 +350,102 @@ def retrieve_laws(vectorstore,
     return retrieve_laws_faiss(vectorstore, query, k=faiss_only_k)
 
 
-def run(query, exact_faiss_k=1, faiss_only_k=5):
+def _doc_to_record(item):
+    """
+    把单条检索结果归一化为统一记录 {law_name, article, content, source}。
+    兼容两种输入：
+    1. FAISS 返回的 LangChain Document（metadata 多键回退，兼容旧版 2 键向量库）
+    2. 精确索引返回的 dict
+    source 按元素类型推断：dict -> "exact"，Document -> "faiss"。
+    """
+    if hasattr(item, "metadata"):
+        metadata = item.metadata or {}
+        law_name = (
+            metadata.get("law_name_raw")
+            or metadata.get("law_name")
+            or metadata.get("law_name_norm")
+            or ""
+        )
+        article = metadata.get("article", "")
+        content = metadata.get("content", "") or getattr(item, "page_content", "")
+        source = "faiss"
+    elif isinstance(item, dict):
+        law_name = (
+            item.get("law_name_raw")
+            or item.get("law_name")
+            or item.get("law_name_norm")
+            or ""
+        )
+        article = item.get("article", "")
+        content = item.get("content", "")
+        source = "exact"
+    else:
+        return {"law_name": "", "article": "", "content": str(item), "source": "unknown"}
+
+    return {
+        "law_name": law_name,
+        "article": article,
+        "content": content,
+        "source": source,
+    }
+
+
+def _save_docs_json(docs, query):
+    """
+    将检索结果归一化后序列化为 JSON，写入 {APPDATA_DIR}/pipeline/rag_result.json
+    （APPDATA_DIR 未设置时回退到 <仓库根>/resources/pipeline/rag_result.json）。
+    每次调用覆盖上次结果；写失败时仅打印 stderr 警告，不中断检索。
+    """
+    records = [_doc_to_record(doc) for doc in docs]
+    payload = {
+        "query": query,
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "total": len(records),
+        "results": records,
+    }
+
+    out_path = os.path.join(_get_pipeline_dir(), "rag_result.json")
+    try:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[rag] 保存检索结果 JSON 失败: {e}", file=sys.stderr)
+
+
+def main():
     """
     知识库检索模块的统一入口，一次调用完成整个 RAG 环节。
 
-    Args:
-        query: 用户咨询文本。
-        exact_faiss_k: 精确命中时补充的 FAISS 条数。
-        faiss_only_k: 未命中时直接 FAISS 的条数。
+    查询文本从环境变量 RAG_QUERY 读取（由宿主 APP 传入），缺失时报错退出；
+    检索结果会归一化写入 {APPDATA_DIR}/pipeline/rag_result.json，
+    供 build.main() 经文件链读取。
 
     Returns:
-        list: 统一格式的检索结果（FAISS Document 或精确索引 dict），
-              可直接传给 build.run() 构建 prompt。
+        list: 统一格式的检索结果（FAISS Document 或精确索引 dict）。
     """
+    query = os.getenv("RAG_QUERY")
+    if not query:
+        print("[rag] 缺少环境变量 RAG_QUERY", file=sys.stderr)
+        sys.exit(1)
+
     vectorstore, exact_index, law_name_candidates = _get_resources()
-    return retrieve_laws(
+    docs = retrieve_laws(
         vectorstore=vectorstore,
         query=query,
         exact_index=exact_index,
         law_name_candidates=law_name_candidates,
-        exact_faiss_k=exact_faiss_k,
-        faiss_only_k=faiss_only_k,
     )
+    _save_docs_json(docs, query)
+    return docs
+
+
+if __name__ == "__main__":
+    main()
 
 
 __all__ = [
-    "run",
+    "main",
     "normalize_law_name",
     "normalize_article_number",
     "match_law_name_from_query",

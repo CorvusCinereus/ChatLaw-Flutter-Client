@@ -13,6 +13,8 @@
 """
 
 import os
+import sys
+import pickle
 
 from transformers import AutoTokenizer
 
@@ -30,6 +32,13 @@ def _get_resources_path():
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "resources",
     )
+
+
+def _get_pipeline_dir():
+    """
+    返回流水线输出子目录：{资源根}/pipeline。
+    """
+    return os.path.join(_get_resources_path(), "pipeline")
 
 
 _TOKENIZER_FILES = [
@@ -88,27 +97,49 @@ def _get_tokenizer():
     return _tokenizer
 
 
-def run(final_prompt, return_tensors="pt"):
+def main():
     """
     分词模块的统一入口，一次调用完成 chat 模板套用 + 分词。
 
-    Args:
-        final_prompt: 组装好的最终推理 prompt。
-        return_tensors: 返回张量类型，pt 客户端传 "pt"，ms 客户端传 "np"。
+    输入读取 {APPDATA_DIR}/pipeline/prompt.txt（由 build.main() 生成）；
+    输出以 pickle 序列化写入 {APPDATA_DIR}/pipeline/model_inputs.pkl
+    （return_tensors 固定为 "pt"，对应 Transformers 服务端）。
 
     Returns:
         model_inputs: 可直接发送给服务端的模型输入。
     """
+    in_path = os.path.join(_get_pipeline_dir(), "prompt.txt")
+    if not os.path.isfile(in_path):
+        print(f"[tokenize] 缺少输入文件: {in_path}（请先运行 build.main()）", file=sys.stderr)
+        sys.exit(1)
+
+    with open(in_path, "r", encoding="utf-8") as f:
+        final_prompt = f.read()
+
     tokenizer = _get_tokenizer()
 
     messages = [{"role": "user", "content": final_prompt}]
     templated = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-    return tokenizer([templated], return_tensors=return_tensors)
+    model_inputs = tokenizer([templated], return_tensors="pt")
+
+    out_path = os.path.join(_get_pipeline_dir(), "model_inputs.pkl")
+    try:
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "wb") as f:
+            pickle.dump(model_inputs, f)
+    except Exception as e:
+        print(f"[tokenize] 保存 model_inputs 失败: {e}", file=sys.stderr)
+
+    return model_inputs
+
+
+if __name__ == "__main__":
+    main()
 
 
 __all__ = [
-    "run",
+    "main",
     "_get_tokenizer",
 ]

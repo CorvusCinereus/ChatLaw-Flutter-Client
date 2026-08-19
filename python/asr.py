@@ -9,6 +9,7 @@
 """
 
 import os
+import sys
 import time
 import uuid
 
@@ -35,6 +36,13 @@ def _get_resources_path():
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "resources",
     )
+
+
+def _get_pipeline_dir():
+    """
+    返回流水线输出子目录：{资源根}/pipeline。
+    """
+    return os.path.join(_get_resources_path(), "pipeline")
 
 
 AUDIO_CACHE_DIR = os.path.join(_get_resources_path(), "_asr_cache")
@@ -164,9 +172,25 @@ def speech_to_text(audio, target_sr, audio_cache_dir, audio_model):
     return text
 
 
+def _save_asr_result(text):
+    """
+    把识别文本写入 {资源根}/pipeline/asr_result.txt。
+    写失败仅打印 stderr 警告，不影响返回值。
+    """
+    try:
+        out_dir = _get_pipeline_dir()
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "asr_result.txt"), "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception as e:
+        print(f"[asr] 保存识别文本失败: {e}", file=sys.stderr)
+
+
 def run(audio):
     """
     语音转文字模块的统一入口，一次调用完成整个 ASR 环节。
+
+    识别结果会同时写入 {APPDATA_DIR}/pipeline/asr_result.txt。
 
     Args:
         audio: (sample_rate, numpy_array)，来自麦克风输入的音频。
@@ -174,12 +198,14 @@ def run(audio):
     Returns:
         str: 识别出的中文文本或错误提示。
     """
-    return speech_to_text(
+    text = speech_to_text(
         audio=audio,
         target_sr=TARGET_SR,
         audio_cache_dir=AUDIO_CACHE_DIR,
         audio_model=_get_audio_model()
     )
+    _save_asr_result(text)
+    return text
 
 
 __all__ = [
