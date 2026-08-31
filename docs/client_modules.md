@@ -247,14 +247,18 @@ transformers
 
 ```bash
 # 在 chatlaw-flutter-client 仓库根目录执行
-flet build apk                 # 默认 Python 3.14 即可
-# 或指定架构 / 旧版 Flet 指定 Python 版本
+# ★ 必须指定 --arch arm64-v8a：onnxruntime 在 pypi.flet.dev 镜像只有
+#   arm64_v8a / x86_64 的 android wheel；构建 armeabi-v7a 会在 pip 阶段报
+#   "No matching distribution found for onnxruntime"
 flet build apk --arch arm64-v8a
-flet build apk --python-version 3.12   # 仅 Flet < 0.86 时需要用 3.12
+# 旧版 Flet（<0.86）需同时指定 Python 3.12：
+flet build apk --arch arm64-v8a --python-version 3.12
 ```
 
 - **Python 版本**：默认 3.14 即可。requirements 已移除 `funasr_onnx`（其 `numpy<=1.26.4` 约束曾锁死 Python<=3.12），镜像有 numpy 2.4.6 / faiss-cpu 1.14.3 / onnxruntime 1.27.0 的 **cp314** android wheel。
-- 构建时 Flet 会自动执行 `pip install --only-binary :all: --extra-index-url https://pypi.flet.dev -r python/requirements.txt`。
+- **ABI 限制**：**仅支持 arm64-v8a**（主流 64 位设备）。`armeabi-v7a` 因 onnxruntime 无对应 android wheel 无法构建（`onnxruntime` 是 rag 嵌入的运行时，暂无替代轮子）；如确需 v7a，需另行替换 embedding 运行时并调整依赖。
+- **serious_python 打包**：serious_python 会按 Gradle 的 `ndk.abiFilters` 逐个 ABI 跑 pip 安装 `python/requirements.txt`。必须在 `android/app/build.gradle.kts` 的 `defaultConfig` 中限制 `ndk { abiFilters += listOf("arm64-v8a") }`（本仓库已配置），否则构建 armeabi-v7a 时因 onnxruntime 无 wheel 解析失败。Python ≥ 3.13 起官方已放弃 32 位 Android（PEP 738），仅保留 arm64-v8a / x86_64。
+- 构建时 Flet 会自动执行 `pip install --only-binary :all: --extra-index-url https://pypi.flet.dev -r python/requirements.txt`（按 `--arch` 指定的 Android ABI 解析）。
 - **勿改动钉版**：`numpy==2.4.6` 等版本对应镜像 android wheel，升版后 Android 打包可能找不到轮子。
 
 ### 6.2 资源打包
@@ -320,6 +324,7 @@ await p.run(
 ### 6.5 打包前核对清单
 
 - [ ] `requirements.txt` 版本保持钉版（numpy==2.4.6 / faiss-cpu==1.14.3 / onnxruntime==1.27.0）
+- [ ] 构建命令带 `--arch arm64-v8a`（勿构建 armeabi-v7a，onnxruntime 无对应 wheel）
 - [ ] `vectorstore/embedding_model/model.onnx` 已导出并随包
 - [ ] `vectorstore/`、`tokenizer/` 完整随包，解压后结构符合 6.2
 - [ ] `APPDATA_DIR` / `RAG_QUERY` 注入逻辑已实现
