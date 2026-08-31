@@ -31,6 +31,7 @@ import json
 import types
 import shutil
 import pickle
+import tempfile
 
 REPO_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
@@ -254,6 +255,54 @@ finally:
     cleanup_pipeline()
 
 # ============================================================
+# 4b. rag._OnnxEmbeddings（onnxruntime 向量嵌入，无 torch）
+# ============================================================
+section("4b. rag._OnnxEmbeddings（onnxruntime 向量嵌入）")
+import numpy as np
+import onnx
+import onnx.helper as oh
+import onnxruntime as ort
+
+# 构造微型 ONNX 模型：output = cast(attention_mask)（形状 [1, seq]）
+tiny_onnx = os.path.join(tempfile.gettempdir(), "tiny_embed_test.onnx")
+in_ids = oh.make_tensor_value_info("input_ids", onnx.TensorProto.INT64, [1, "seq"])
+in_mask = oh.make_tensor_value_info("attention_mask", onnx.TensorProto.INT64, [1, "seq"])
+out_val = oh.make_tensor_value_info("output", onnx.TensorProto.FLOAT, [1, "seq"])
+node = oh.make_node("Cast", ["attention_mask"], ["output"], to=onnx.TensorProto.FLOAT)
+graph = oh.make_graph([node], "tiny_embed", [in_ids, in_mask], [out_val])
+tiny_model = oh.make_model(graph, opset_imports=[oh.make_opsetid("", 19)])
+tiny_model.ir_version = 10  # 兼容 onnxruntime 1.23（IR<=11）
+onnx.save(tiny_model, tiny_onnx)
+try:
+    emb = rag._OnnxEmbeddings.__new__(rag._OnnxEmbeddings)
+    emb._session = ort.InferenceSession(tiny_onnx)
+
+    class FakeTok:
+        def __call__(self, texts, **kwargs):
+            return {
+                "input_ids": np.array([[1, 2, 3]], dtype=np.int64),
+                "attention_mask": np.array([[1, 1, 1]], dtype=np.int64),
+            }
+
+    emb._tokenizer = FakeTok()
+    emb._input_names = ["input_ids", "attention_mask"]
+
+    vec = emb._embed("测试文本")
+    check("_embed 返回一维向量", isinstance(vec, list) and len(vec) == 3, f"vec={vec}")
+    check("embed_query / embed_documents 可用",
+          emb.embed_query("a") == vec and emb.embed_documents(["b", "c"]) == [vec, vec])
+
+    # 缺 ONNX 模型时应给出明确报错
+    try:
+        rag.load_vectorstore("/nonexistent/vectorstore")
+        check("load_vectorstore 缺 ONNX 模型时报错", False)
+    except FileNotFoundError as e:
+        check("load_vectorstore 缺 ONNX 模型时报错", "model.onnx" in str(e), str(e)[:60])
+finally:
+    if os.path.isfile(tiny_onnx):
+        os.remove(tiny_onnx)
+
+# ============================================================
 # 5. build.main 文件链 Prompt 构造
 # ============================================================
 section("5. build.main 文件链 Prompt 构造")
@@ -325,6 +374,15 @@ try:
     check("asr_result.txt 已生成", os.path.isfile(ASR_TXT), ASR_TXT)
     with open(ASR_TXT, "r", encoding="utf-8") as f:
         check("asr_result.txt 内容为识别文本", f.read() == text)
+
+    # 非 16k 采样率：验证纯 numpy 重采样路径（原 librosa 已移除）
+    data48 = (np.sin(np.linspace(0, 2 * np.pi * 440, 48000)) * 0.5).astype(np.float32)
+    text48 = asr.run((48000, data48))
+    check("run 支持非 16k 采样率（重采样路径）", text48 == "我要咨询劳动法问题", f"got {text48!r}")
+
+    out = asr._resample(data48, 48000, 16000)
+    check("_resample 输出长度正确", len(out) == 16000, f"len={len(out)}")
+    check("_resample 输出为 float32", out.dtype == np.float32, f"dtype={out.dtype}")
 
     text_none = asr.run(None)
     check("audio=None 返回提示", text_none == "未检测到语音输入", f"got {text_none!r}")

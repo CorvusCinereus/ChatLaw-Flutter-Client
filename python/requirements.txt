@@ -1,26 +1,31 @@
 # ChatLaw 客户端独立模块依赖（chatlaw-flutter-client/python/）
 # 适用于 asr.py、rag.py、build.py、tokenize.py 四个模块
-# 仅包含运行必需的包；gradio / markdown / pyside6 / jieba 等其余客户端依赖不在其中。
+# ★ Android 兼容集（Flet 构建）★
+#
 # 说明：
-#   - torch 由 transformers 与 sentence-transformers 自动携带，无需单独声明。
-#   - 资源懒加载下载逻辑已内嵌在各模块中（openi 延迟导入），openi 仍需显式安装。
-#   - 资源根目录由环境变量 APPDATA_DIR 指定（宿主 APP 启动 Python 进程前传入），
-#     未设置时回退到仓库根目录下 resources/。
+#   - 本清单仅含可在 Android 上运行的依赖：编译型依赖全部有 pypi.flet.dev 的
+#     android_24_arm64_v8a wheel（含 cp314），纯 Python 依赖可跨平台。
+#   - 已移除的包及原因：
+#       * funasr_onnx —— 其 numpy<=1.26.4 约束锁死 Python<=3.12，且依赖的 onnx /
+#         kaldi-native-fbank / sentencepiece / librosa(numba) 均无 Android wheel；
+#         ASR 改由 Android 原生语音识别完成，asr.py 仅作桌面/开发工具。
+#       * soundfile / librosa —— asr 的 wav 写入改用标准库 wave，重采样为纯 numpy。
+#       * langchain-huggingface / sentence-transformers —— 依赖 torch（无 Android
+#         wheel）；向量嵌入改用 onnxruntime 实现（见 rag._OnnxEmbeddings）。
+#       * openi —— 其依赖 pwinput 仅有源码包（无 wheel），Flet --only-binary :all:
+#         无法安装；资源应随 APP 打包进 APPDATA_DIR。
+#   - Python 版本：无 numpy<=1.26.4 约束后，Flet 默认的 Python 3.14 即可。
 
-# —— asr.py：语音转文字（Paraformer ASR）——
-numpy
-soundfile
-librosa
-funasr_onnx
-
-# —— rag.py：知识库检索（FAISS + 精确索引混合检索）——
+# —— rag.py：知识库检索（FAISS + onnxruntime 嵌入）——
+# 版本钉到 pypi.flet.dev 镜像上存在 android wheel 的版本，避免 Flet Android 打包找不到轮子。
+numpy==2.4.6
+faiss-cpu==1.14.3
+onnxruntime==1.27.0
 langchain-community
-langchain-huggingface
-faiss-cpu              # langchain_community 的 FAISS 模块必需，未被其依赖自动携带
-sentence-transformers  # HuggingFaceEmbeddings 必需，langchain-huggingface 仅在 full extra 中携带
 
-# —— tokenize.py：分词（Qwen3 chat template）——
+# —— tokenize.py：分词（Qwen3 fast tokenizer，无需 torch/sentencepiece）——
 transformers
+# tokenizers / safetensors / huggingface-hub 等由 transformers 自动携带，镜像均有 android wheel。
 
-# —— 通用：资源懒加载下载（openi 延迟导入于各模块 _download_*）——
-openi
+# —— asr.py：桌面语音转文字工具（Android 由系统语音识别替代）——
+# 桌面端需要时手动安装：funasr_onnx soundfile

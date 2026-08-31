@@ -6,17 +6,19 @@
 - 资源（Paraformer 语音模型）采用首次调用 run() 时懒加载并缓存，
   缺失时通过启智社区（openi）自动下载到资源根目录（APPDATA_DIR 或回退的 <仓库根>/resources/）。
 - 对外只暴露一个统一入口 run()，一次调用即可完成整个 ASR 环节。
+
+注意：本模块为**桌面/开发工具**。Android 上 funasr_onnx 及其依赖无 Android wheel，
+语音转文字由 Android 原生语音识别完成（文本直接进入 rag）；funasr 采用延迟导入，
+未安装 funasr_onnx 时模块仍可正常 import。
 """
 
 import os
 import sys
 import time
 import uuid
+import wave
 
 import numpy as np
-import soundfile as sf
-import librosa
-from funasr_onnx import Paraformer
 
 
 # ========== 模块级常量 ==========
@@ -96,6 +98,8 @@ def _get_audio_model():
             _get_resources_path(), "audio_model"
         ).replace("\\", "/")
         os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
+        # funasr 延迟导入：Android 上未安装 funasr_onnx 时模块仍可 import
+        from funasr_onnx import Paraformer
         _audio_model = Paraformer(
             audio_model_dir,
             batch_size=1,
@@ -103,6 +107,20 @@ def _get_audio_model():
             device_id=-1
         )
     return _audio_model
+
+
+def _resample(data, orig_sr, target_sr):
+    """
+    用线性插值把音频从 orig_sr 重采样到 target_sr。
+
+    纯 numpy 实现，避免引入 librosa（其 numba/llvmlite 依赖在部分平台
+    （Android / 新版 Python）没有预编译 wheel，会导致 pip 解析失败）。
+    输出采样数约为 len(data) * target_sr / orig_sr（向上取整，与 librosa 近似）。
+    """
+    n_out = max(1, int(np.ceil(len(data) * target_sr / orig_sr)))
+    x_old = np.linspace(0.0, len(data), len(data), endpoint=False)
+    x_new = np.linspace(0.0, len(data), n_out, endpoint=False)
+    return np.interp(x_new, x_old, data).astype(np.float32)
 
 
 def speech_to_text(audio, target_sr, audio_cache_dir, audio_model):
@@ -123,7 +141,7 @@ def speech_to_text(audio, target_sr, audio_cache_dir, audio_model):
 
     # ---------- 2. 重采样到 16k ----------
     if sr != target_sr:
-        data = librosa.resample(data, orig_sr=sr, target_sr=target_sr)
+        data = _resample(data, sr, target_sr)
 
     # ---------- 3. 幅值归一化（防止过小） ----------
     max_val = np.max(np.abs(data))
@@ -135,11 +153,15 @@ def speech_to_text(audio, target_sr, audio_cache_dir, audio_model):
     if duration < 0.8:
         return "语音过短，请说完整一句话"
 
-    # ---------- 5. 写入固定目录 wav（避免 tempfile 坑） ----------
+    # ---------- 5. 写入固定目录 wav（避免 tempfile 坑；用标准库 wave，不依赖 soundfile） ----------
     wav_name = f"{uuid.uuid4().hex}.wav"
     wav_path = os.path.join(audio_cache_dir, wav_name)
 
-    sf.write(wav_path, data, target_sr, subtype="PCM_16")
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(target_sr)
+        wf.writeframes((np.clip(data, -1.0, 1.0) * 32767).astype(np.int16).tobytes())
 
     # 确保文件完全落盘（Windows 必须）
     time.sleep(0.05)

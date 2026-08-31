@@ -1,34 +1,72 @@
-# 客户端 Python 模块说明
+# 客户端 Python 模块说明（ChatLaw Flutter 客户端）
 
-说明：以下整理 `python/` 下 4 个独立模块（`asr.py` / `rag.py` / `build.py` / `tokenize.py`）及其统一入口函数。
+本文档说明 `chatlaw-flutter-client/python/` 下 4 个独立模块（`asr.py` / `rag.py` / `build.py` / `tokenize.py`）的设计、用法、Android 打包需求与测试方法。
 
-这些模块把客户端流水线「语音转文字 → RAG 检索 → 构建 prompt → 分词」四个环节，从原本分散的函数整理为独立模块。每个模块满足：
+## 目录
 
-- 所需函数**原样搬入**模块内，不依赖原 client / server 实现文件（`client_pt.py`、`common_utils.py` 等均未改动）。
-- 资源（Paraformer / 向量库 / tokenizer）采用**首次调用时懒加载并缓存**，模块 import 时不会触发任何下载或加载。
-- 模块为**自包含实现**：资源路径与下载逻辑（openi 延迟导入）内嵌在各模块内，资源根目录优先读取环境变量 `APPDATA_DIR`（由宿主 APP 传入），未设置时回退到 `<仓库根>/resources/`，不依赖原 ChatLaw 仓库的 `launcher` / `chatlaw.dataloader`。
-- 各模块构成**独立可执行的脚本链**：rag / build / tokenize 暴露统一入口 `main()`（可经 `__main__` 直接运行），输入/输出经 `{APPDATA_DIR}/pipeline/` 下的文件串联；asr 保持 `run()` 供 APP 进程内调用。
+1. [概述](#1-概述)
+2. [环境与约定](#2-环境与约定)
+3. [流水线文件链](#3-流水线文件链)
+4. [模块详解](#4-模块详解)
+5. [依赖清单（Android 兼容集）](#5-依赖清单android-兼容集)
+6. [Android 打包指南](#6-android-打包指南)
+7. [测试](#7-测试)
 
-> **⚠️ 导入方式（重要）**：`python/` 是一个 Python 包（含 `__init__.py`），4 个模块必须以命名空间方式导入：
-> `from python import asr, rag, build, tokenize`（或 `import python.asr`）。
-> **切勿**把 `python/` 目录直接加进 `sys.path` 后顶层导入（`import tokenize`）——
-> 顶层模块名 `tokenize` 会遮蔽标准库 `tokenize`，导致 transformers / torch / linecache 等内部
-> `import tokenize` 时解析到本模块，引发连锁循环导入（`inspect` / `AutoTokenizer` 报错）。
+---
 
-> **📦 资源根目录（环境变量）**：各模块通过 `os.getenv("APPDATA_DIR")` 读取资源根目录，
-> 该变量由宿主 APP 在启动 Python 进程前传入；未设置时回退到 `<仓库根>/resources/`。
-> 例：`APPDATA_DIR=D:/appdata` 时，向量库路径为 `D:/appdata/vectorstore/law_faiss`。
+## 1. 概述
 
-## 模块概览
+这 4 个模块把客户端流水线「语音转文字 → RAG 检索 → 构建 prompt → 分词」四个环节，从原本分散的函数整理为独立模块。
 
-| 模块 | 对应环节 | 统一入口 | 输入来源 | 输出文件（pipeline/ 下） | 懒加载资源 |
+| 模块 | 环节 | 统一入口 | 输入来源 | 输出文件（pipeline/ 下） | Android 状态 |
 |---|---|---|---|---|---|
-| `python/asr.py` | ① 语音转文字 | `run(audio)` | 麦克风音频（APP 传入） | `asr_result.txt` | Paraformer 语音模型 |
-| `python/rag.py` | ② 知识库检索 | `main()` | 环境变量 `RAG_QUERY` | `rag_result.json` | FAISS 向量库 + 精确索引 + 法条名候选 |
-| `python/build.py` | ③ 构建 prompt | `main()` | 读取 `rag_result.json` | `prompt.txt` | 无（纯字符串拼接） |
-| `python/tokenize.py` | ④ 分词 | `main()` | 读取 `prompt.txt` | `model_inputs.pkl` | Qwen3 tokenizer |
+| `python/asr.py` | ① 语音转文字 | `run(audio)` | 麦克风音频（APP 传入） | `asr_result.txt` | 桌面工具（Android 由系统语音识别替代） |
+| `python/rag.py` | ② 知识库检索 | `main()` | 环境变量 `RAG_QUERY` | `rag_result.json` | ✅ 可用（需 `model.onnx`） |
+| `python/build.py` | ③ 构建 prompt | `main()` | 读取 `rag_result.json` | `prompt.txt` | ✅ 可用 |
+| `python/tokenize.py` | ④ 分词 | `main()` | 读取 `prompt.txt` | `model_inputs.pkl` | ✅ 可用 |
 
-## 流水线文件链
+设计要点：
+
+- 不依赖原 ChatLaw 仓库代码（`client_pt.py`、`common_utils.py` 等均未改动），可独立运行。
+- 资源（Paraformer / 向量库 / tokenizer）采用**首次调用时懒加载并缓存**，模块 import 时不会触发任何下载或加载。
+- 模块为**自包含实现**：资源路径与下载逻辑内嵌在各模块内，资源根目录优先读取环境变量 `APPDATA_DIR`，未设置时回退到 `<仓库根>/resources/`。
+- 各模块构成**独立可执行的脚本链**：rag / build / tokenize 暴露统一入口 `main()`（可经 `__main__` 直接运行），输入/输出经 `{APPDATA_DIR}/pipeline/` 下的文件串联；asr 保持 `run()` 供 APP 进程内调用。
+- 依赖清单为 **Android 兼容集**（见 [第 5 节](#5-依赖清单android-兼容集)）：编译型依赖均有 `pypi.flet.dev` 的 android wheel（含 Python 3.14，无需 `--python-version`）。
+
+---
+
+## 2. 环境与约定
+
+### 2.1 Python 包导入方式（⚠️ 重要）
+
+`python/` 是一个 Python 包（含 `__init__.py`），4 个模块必须以命名空间方式导入：
+
+```python
+from python import asr, rag, build, tokenize   # 或 import python.asr
+```
+
+**切勿**把 `python/` 目录直接加进 `sys.path` 后顶层导入（`import tokenize`）——顶层模块名 `tokenize` 会遮蔽标准库 `tokenize`，导致 transformers / torch / linecache 等内部 `import tokenize` 时解析到本模块，引发连锁循环导入（`inspect` / `AutoTokenizer` 报错）。
+
+### 2.2 资源根目录 `APPDATA_DIR`
+
+各模块通过 `os.getenv("APPDATA_DIR")` 读取资源根目录，该变量由宿主 APP 在启动 Python 进程前传入；未设置时回退到 `<仓库根>/resources/`（便于独立运行与测试）。
+
+例：`APPDATA_DIR=D:/appdata` 时，向量库路径为 `D:/appdata/vectorstore/law_faiss`。
+
+### 2.3 环境变量清单
+
+| 变量 | 必填 | 设置方 | 说明 |
+|---|---|---|---|
+| `APPDATA_DIR` | ✅ | 宿主 APP | 资源根目录（见 [6.2](#62-资源打包)） |
+| `RAG_QUERY` | 每次调用 rag 时 | 宿主 APP | rag 的查询文本（语音识别文本 / 用户输入） |
+
+### 2.4 流水线输出目录
+
+所有中间产物统一写入 `{APPDATA_DIR}/pipeline/`，由各模块的 `_get_pipeline_dir()` 计算（`os.path.join(_get_resources_path(), "pipeline")`），写文件前自动 `os.makedirs`，写失败仅打印 stderr 警告、不中断主流程。
+
+---
+
+## 3. 流水线文件链
 
 ```
 {APPDATA_DIR}/pipeline/
@@ -43,16 +81,28 @@ build.main()（读 rag_result.json）──▶ prompt.txt ──▶ 返回 promp
 tokenize.main()（读 prompt.txt）──▶ model_inputs.pkl ──▶ 返回 model_inputs
 ```
 
-APP 侧典型编排：进程内调用 `asr.run(audio)` 获得文本 → 以环境变量 `RAG_QUERY=<文本>` 启动 `python -m python.rag` → 依次启动 `python -m python.build`、`python -m python.tokenize`，最终读取 `model_inputs.pkl` 发送给服务端。
+APP 侧典型编排：
+
+- **Android**：语音经系统原生语音识别转文本 → 以环境变量 `RAG_QUERY=<文本>` 启动 `python -m python.rag` → 依次启动 `python -m python.build`、`python -m python.tokenize` → 读取 `model_inputs.pkl` 发送给服务端。
+- **桌面**：可先用 `asr.run(audio)` 取文本，其余环节相同。
+
+| 文件 | 产出模块 | 内容 | 消费方 |
+|---|---|---|---|
+| `asr_result.txt` | asr.run | 识别文本 | 桌面端 APP（Android 用系统识别） |
+| `rag_result.json` | rag.main | `{query, timestamp, total, results[]}`，每条含 `law_name/article/content/source` | build.main |
+| `prompt.txt` | build.main | 最终推理 prompt | tokenize.main |
+| `model_inputs.pkl` | tokenize.main | pickle 序列化的模型输入（`return_tensors="pt"`） | 服务端 |
 
 ---
 
-## 一、`asr.run`
+## 4. 模块详解
 
-- **功能**：语音转文字环节的统一入口（保留 `run` 命名，供 APP 进程内调用）。一次调用即可完成「音频预处理 → 写入临时 wav → Paraformer 推理 → 解析识别结果」整个 ASR 流程，返回中文文本，并同时把文本写入 `{APPDATA_DIR}/pipeline/asr_result.txt`。
+### 4.1 `asr.run`（桌面工具）
+
+- **功能**：语音转文字环节的统一入口（保留 `run` 命名，供 APP 进程内调用）。一次调用即可完成「音频预处理 → 写入临时 wav → Paraformer 推理 → 解析识别结果」整个 ASR 流程，返回中文文本，并同时把文本写入 `{APPDATA_DIR}/pipeline/asr_result.txt`。**本模块为桌面/开发工具**：Android 上 funasr_onnx 及其依赖无 Android wheel，语音转文字由 Android 原生语音识别完成（文本直接进入 rag）。
 - **参数**：
   - `audio`（必填）：`(sample_rate, numpy_array)` 元组，即 Gradio `gr.Audio(type="numpy")` 麦克风输入。
-    - `sample_rate`：`int`，音频采样率（如 44100 / 48000）。若与目标采样率 `16000` 不同，内部会用 `librosa.resample` 重采样到 16k。
+    - `sample_rate`：`int`，音频采样率（如 44100 / 48000）。若与目标采样率 `16000` 不同，内部会用纯 numpy 线性插值 `_resample()` 重采样到 16k（不依赖 librosa，保证在无 numba wheel 的平台可安装）。
     - `numpy_array`：`numpy.ndarray`，音频数据。若为立体声（`ndim > 1`），内部会先取各声道均值转单声道；随后转 `float32`、做幅值归一化（最大幅值归一化到 0.9，防止音量过小）。
     - 若传入 `None`，直接返回提示文本 `"未检测到语音输入"`。
   - 模块内部固定使用（无需外部传入）：`TARGET_SR = 16000`（目标采样率）、`AUDIO_CACHE_DIR = {APPDATA_DIR}/_asr_cache`（临时 wav 缓存目录）、懒加载的 `Paraformer` 模型实例。
@@ -60,12 +110,10 @@ APP 侧典型编排：进程内调用 `asr.run(audio)` 获得文本 → 以环�
   - 正常：识别出的中文文本（同时写入 `asr_result.txt`）。
   - 各类异常情况返回提示文本：`"未检测到语音输入"`、`"语音过短，请说完整一句话"`（时长 < 0.8 秒）、`"ASR 推理异常: <e>"`、`"未识别到有效内容"`。
   - 特殊：识别结果为空字符串时会**抛出** `ValueError("语音未识别到有效内容！")`。
-- **位置**：`python/asr.py:189`
-- **内部实现**：调用模块内搬入的原函数 `speech_to_text(audio, target_sr, audio_cache_dir, audio_model)`（原样搬自 `common_utils.py:156`），资源由 `_get_audio_model()`（`asr.py:87`）懒加载提供（首次调用时 `_download_audio_model()` 从启智社区补齐资源）；`_save_asr_result()`（`asr.py:175`）把文本写入 pipeline 子目录。
+- **位置**：`python/asr.py:211`
+- **内部实现**：调用模块内搬入的原函数 `speech_to_text(audio, target_sr, audio_cache_dir, audio_model)`（原样搬自 `common_utils.py:156`，其中重采样已改为模块内纯 numpy 实现 `_resample()`，不依赖 librosa；wav 写入改用标准库 `wave`，不依赖 soundfile），资源由 `_get_audio_model()`（`asr.py:89`）懒加载提供（首次调用时 `_download_audio_model()` 从启智社区补齐资源，`funasr_onnx` 为延迟导入，Android 上未安装时模块仍可 import）；`_save_asr_result()`（`asr.py:197`）把文本写入 pipeline 子目录。
 
----
-
-## 二、`rag.main`
+### 4.2 `rag.main`
 
 - **功能**：知识库检索环节的统一入口。一次调用即可完成「精确索引检索（某法第几条）→ 未命中兜底 FAISS 语义检索 → 混合结果去重合并 → 归一化落盘」整个 RAG 流程，返回统一格式的检索结果列表。
 - **环境变量（输入）**：
@@ -86,12 +134,10 @@ APP 侧典型编排：进程内调用 `asr.run(audio)` 获得文本 → 以环�
   }
   ```
 - **返回值**：`list`，统一格式的检索结果（FAISS Document 或精确索引 dict），进程内调用时可直接使用。
-- **位置**：`python/rag.py:416`（`__main__` 入口在 `:443`）
-- **内部实现**：检索逻辑由模块内搬入的 `retrieve_laws(...)` 混合检索函数完成（原样搬自 `common_utils.py:426`），其内部串联 `retrieve_laws_exact`（精确索引）、`retrieve_laws_faiss`（FAISS）、`merge_docs_keep_order`（去重合并）；资源由 `_get_resources()`（`rag.py:95`）懒加载提供（首次调用时 `_download_vectorstore()` 从启智社区补齐资源）。归一化由 `_doc_to_record()`（`rag.py:353`）完成：多键回退兼容新旧版向量库，`source` 按元素类型推断（dict → `"exact"`、Document → `"faiss"`）；落盘由 `_save_docs_json()`（`rag.py:393`）完成，写失败仅打印 stderr 警告，不中断检索。
+- **位置**：`python/rag.py:455`（`__main__` 入口在 `:482`）
+- **内部实现**：检索逻辑由模块内搬入的 `retrieve_laws(...)` 混合检索函数完成（原样搬自 `common_utils.py:426`），其内部串联 `retrieve_laws_exact`（精确索引）、`retrieve_laws_faiss`（FAISS）、`merge_docs_keep_order`（去重合并）；资源由 `_get_resources()`（`rag.py:96`）懒加载提供（首次调用时 `_download_vectorstore()` 从启智社区补齐资源）。向量嵌入由 `_OnnxEmbeddings`（`rag.py:186`，onnxruntime，无 torch 依赖，Android 可用）实现，模型约定为 `{资源根}/vectorstore/embedding_model/model.onnx`（桌面端导出后随资源打包）。归一化由 `_doc_to_record()`（`rag.py:392`）完成：多键回退兼容新旧版向量库，`source` 按元素类型推断（dict → `"exact"`、Document → `"faiss"`）；落盘由 `_save_docs_json()`（`rag.py:432`）完成，写失败仅打印 stderr 警告，不中断检索。
 
----
-
-## 三、`build.main`
+### 4.3 `build.main`
 
 - **功能**：Prompt 构建环节的统一入口。从 `{APPDATA_DIR}/pipeline/rag_result.json` 读取 `query` 与 `results`，把用户问题与检索到的法律条文拼装成最终推理 prompt（含系统法律咨询设定、【法律条文】上下文、【问题】、【回答】四段结构），写入 `{APPDATA_DIR}/pipeline/prompt.txt`。
 - **输入（文件）**：`{APPDATA_DIR}/pipeline/rag_result.json`（由 `rag.main()` 生成），缺失时打印错误并以退出码 1 结束。
@@ -102,22 +148,43 @@ APP 侧典型编排：进程内调用 `asr.run(audio)` 获得文本 → 以环�
 - **位置**：`python/build.py:99`（`__main__` 入口在 `:133`）
 - **内部实现**：调用模块内搬入的 `build_prompt(question, docs)`（原样搬自 `common_utils.py:499`），其内部使用 `_format_doc_block`（原样搬自 `common_utils.py:465`）逐条格式化。本模块无资源加载，为纯字符串拼接。
 
----
-
-## 四、`tokenize.main`
+### 4.4 `tokenize.main`
 
 - **功能**：分词环节的统一入口。从 `{APPDATA_DIR}/pipeline/prompt.txt` 读取最终 prompt，完成「套用 Qwen3 对话模板（chat template）→ 分词 → pickle 序列化落盘」整个分词流程，产出可直接发送给服务端的模型输入。
 - **输入（文件）**：`{APPDATA_DIR}/pipeline/prompt.txt`（由 `build.main()` 生成），缺失时打印错误并以退出码 1 结束。
 - **输出（文件）**：`{APPDATA_DIR}/pipeline/model_inputs.pkl`，为 `pickle.dump` 序列化的 model_inputs（含 `input_ids`、`attention_mask` 等 PyTorch 张量，`return_tensors="pt"` 对应 Transformers 服务端）。消费侧用 `pickle.load` 读取。
 - **返回值**：`model_inputs`，分词后的模型输入（进程内调用时可直接使用）。
 - **位置**：`python/tokenize.py:100`（`__main__` 入口在 `:138`）
-- **内部实现**：构建 `messages = [{"role": "user", "content": final_prompt}]` → `apply_chat_template(messages, tokenize=False, add_generation_prompt=True)` 生成带生成提示的模板文本 → `tokenizer([templated], return_tensors="pt")` 分词。逻辑原样搬自 `client_pt.py:240-244` / `client_ms.py:240-244`；tokenizer 由 `_get_tokenizer()`（`tokenize.py:83`）懒加载提供（首次调用时 `_download_tokenizer()` 从启智社区补齐资源）。
+- **内部实现**：构建 `messages = [{"role": "user", "content": final_prompt}]` → `apply_chat_template(messages, tokenize=False, add_generation_prompt=True)` 生成带生成提示的模板文本 → `tokenizer([templated], return_tensors="pt")` 分词。逻辑原样搬自 `client_pt.py:240-244` / `client_ms.py:240-244`；tokenizer 由 `_get_tokenizer()`（`tokenize.py:83`）懒加载提供（首次调用时 `_download_tokenizer()` 从启智社区补齐资源）。Qwen3 走 fast tokenizer（`tokenizers` 库，Android 有 wheel），无需 torch / sentencepiece。
 
 ---
 
-## 五、用到的所有库
+## 5. 依赖清单（Android 兼容集）
 
-### 标准库
+`python/requirements.txt` 为 **Android 兼容集**：编译型依赖全部钉到 `pypi.flet.dev` 镜像上存在 android wheel 的版本（含 Python 3.14 的 cp314），纯 Python 依赖可跨平台。
+
+### 5.1 requirements.txt 内容
+
+```text
+numpy==2.4.6
+faiss-cpu==1.14.3
+onnxruntime==1.27.0
+langchain-community
+transformers
+```
+
+传递依赖（自动携带，镜像均有 android wheel）：`tokenizers` / `safetensors` / `huggingface-hub` / `langchain-core` / `langchain-classic` / `scipy` / `pyyaml` 等。
+
+**已移除的包及原因**：
+
+| 包 | 原因 |
+|---|---|
+| `funasr_onnx` | 其 `numpy<=1.26.4` 约束锁死 Python<=3.12；依赖的 `onnx` / `kaldi-native-fbank` / `sentencepiece` / `librosa(numba)` 均无 Android wheel。ASR 改由 Android 原生语音识别完成 |
+| `soundfile` / `librosa` | asr 的 wav 写入改用标准库 `wave`，重采样为纯 numpy `_resample()` |
+| `langchain-huggingface` / `sentence-transformers` | 依赖 torch（无 Android wheel）；向量嵌入改用 onnxruntime `_OnnxEmbeddings` |
+| `openi` | 其依赖 `pwinput` 仅有源码包（无 wheel），Flet `--only-binary :all:` 无法安装；资源应随 APP 打包 |
+
+### 5.2 标准库
 
 | 库 | 模块 | 用途 |
 |---|---|---|
@@ -126,22 +193,23 @@ APP 侧典型编排：进程内调用 `asr.run(audio)` 获得文本 → 以环�
 | `json` | rag / build | 读写 `rag_result.json` 等 JSON 文件 |
 | `time` | asr / rag | 确保 wav 落盘、JSON 时间戳 |
 | `uuid` | asr | 生成临时 wav 文件名（`uuid4().hex`） |
+| `wave` | asr | 用标准库写入 PCM_16 wav（替代 soundfile，Android 兼容） |
 | `sys` | asr / rag / build / tokenize | stderr 警告、`sys.exit(1)` 错误退出 |
 | `pickle` | tokenize | `model_inputs.pkl` 序列化/反序列化 |
 
-### 第三方库
+### 5.3 第三方库
 
 | 库 | 模块 | 用途 |
 |---|---|---|
-| `numpy` | asr | 音频数组处理：转单声道、转 `float32`、幅值归一化 |
-| `soundfile` | asr | 把音频数据写入 PCM_16 wav 临时文件 |
-| `librosa` | asr | 音频重采样到 16k（`librosa.resample`） |
-| `funasr_onnx` | asr | 语音识别模型 `Paraformer`（ONNX 量化版，中文 ASR） |
-| `langchain_huggingface` | rag | `HuggingFaceEmbeddings`（sentence-transformers 向量化，`normalize_embeddings=True`） |
+| `numpy` | asr / rag | 音频处理与线性插值重采样（`_resample`）；FAISS/onnxruntime 的数值基础 |
+| `onnxruntime` | rag | `_OnnxEmbeddings`：向量嵌入推理（Android 有 wheel，替代 torch） |
 | `langchain_community` | rag | `FAISS` 向量库加载（`FAISS.load_local`，`allow_dangerous_deserialization=True`） |
-| `transformers` | tokenize | `AutoTokenizer` 加载 Qwen3 tokenizer、`apply_chat_template`、分词 |
+| `transformers` | rag / tokenize | Qwen3 tokenizer（fast）、`apply_chat_template`、分词；embedding 的 tokenizer |
+| `tokenizers` | rag / tokenize | 快速分词（transformers 自动携带，Android 有 wheel） |
 
-### 内嵌资源逻辑（自包含，无外部项目依赖）
+注：`funasr_onnx` / `soundfile` / `langchain-huggingface` / `sentence-transformers`（torch 链）不在 Android 依赖清单中；桌面端需要 ASR 或 torch 版嵌入时手动安装。
+
+### 5.4 内嵌资源逻辑（自包含，无外部项目依赖）
 
 | 函数 | 模块 | 用途 |
 |---|---|---|
@@ -152,18 +220,116 @@ APP 侧典型编排：进程内调用 `asr.run(audio)` 获得文本 → 以环�
 | `_download_vectorstore()` | rag | 缺失时从启智社区（openi）下载预构建向量库到 `{APPDATA_DIR}/vectorstore` |
 | `_download_tokenizer()` | tokenize | 缺失时从启智社区（openi）下载 tokenizer 到 `{APPDATA_DIR}/` |
 | `_save_asr_result()` | asr | 把识别文本写入 `{APPDATA_DIR}/pipeline/asr_result.txt` |
+| `_resample()` | asr | 纯 numpy 线性插值重采样（替代 librosa.resample，消除 numba/llvmlite 依赖） |
 | `_doc_to_record()` | rag | 把单条检索结果（dict / Document）归一化为 `{law_name, article, content, source}` 统一记录 |
 | `_save_docs_json()` | rag | 把检索结果归一化后写入 `{APPDATA_DIR}/pipeline/rag_result.json`（`main()` 自动调用） |
+| `_OnnxEmbeddings` | rag | onnxruntime 向量嵌入类（模型 `embedding_model/model.onnx`，无 torch 依赖，Android 可用） |
 
-注：`openi` 为延迟导入（仅在首次下载时引入），资源路径不再依赖原 ChatLaw 仓库的 `launcher.get_resources_path()` 与 `chatlaw.dataloader.download_resources()`。
+注：`openi` 为延迟导入（仅在资源缺失触发下载时引入），且**不在 `requirements.txt` 中**——其依赖 `pwinput` 仅有源码包（无 wheel），在 Flet 的 `--only-binary :all:` 构建下任何 Python 版本都无法安装；移动端资源应随 APP 打包进 APPDATA_DIR，开发环境需要自动下载资源时手动 `pip install openi`。
+
+### 5.5 Android wheel 钉版对照表
+
+| 包 | 钉版 | 镜像 android wheel | 说明 |
+|---|---|---|---|
+| `numpy` | `2.4.6` | ✅ cp312/313/314 | 数值基础；勿用 >2.4.6（镜像未提供 android wheel） |
+| `faiss-cpu` | `1.14.3` | ✅ cp312/313/314 | FAISS 向量库 |
+| `onnxruntime` | `1.27.0` | ✅ cp312/313/314 | 向量嵌入推理 |
+| `tokenizers` | 自动 | ✅ 0.23.1 cp312/313/314 | transformers 携带 |
+| `safetensors` | 自动 | ✅ 0.8.0 cp312/313/314 | transformers 携带 |
 
 ---
 
-## 六、测试脚本
+## 6. Android 打包指南
 
-4 个模块的自动化测试脚本位于 `python_test/test_client_modules.py`（另有 `test_rag_import.py` 为 RAG 库冒烟测试），用于验证各模块可正常使用。
+本模块面向 **Flet 打包的 Android APK**（Flutter 端嵌入 Python 运行时）。打包方需满足以下需求。
 
-### 运行方式
+### 6.1 Flet 构建
+
+```bash
+# 在 chatlaw-flutter-client 仓库根目录执行
+flet build apk                 # 默认 Python 3.14 即可
+# 或指定架构 / 旧版 Flet 指定 Python 版本
+flet build apk --arch arm64-v8a
+flet build apk --python-version 3.12   # 仅 Flet < 0.86 时需要用 3.12
+```
+
+- **Python 版本**：默认 3.14 即可。requirements 已移除 `funasr_onnx`（其 `numpy<=1.26.4` 约束曾锁死 Python<=3.12），镜像有 numpy 2.4.6 / faiss-cpu 1.14.3 / onnxruntime 1.27.0 的 **cp314** android wheel。
+- 构建时 Flet 会自动执行 `pip install --only-binary :all: --extra-index-url https://pypi.flet.dev -r python/requirements.txt`。
+- **勿改动钉版**：`numpy==2.4.6` 等版本对应镜像 android wheel，升版后 Android 打包可能找不到轮子。
+
+### 6.2 资源打包
+
+模型 / 向量库 / tokenizer **必须随 APK 打包**，APP 首次启动时解压到 `APPDATA_DIR` 指向的可写目录（如 serious_python 的应用数据目录）。解压后目录结构必须为：
+
+```
+{APPDATA_DIR}/
+├── vectorstore/
+│   ├── law_article_index.json      # 精确索引
+│   ├── law_name_index.json         # 法条名索引
+│   ├── law_faiss/
+│   │   ├── index.faiss             # FAISS 向量库
+│   │   └── index.pkl
+│   └── embedding_model/
+│       ├── model.onnx              # ← 需要桌面端导出的 ONNX 嵌入模型（见下）
+│       └── …tokenizer 文件（tokenizer.json / tokenizer_config.json / vocab.txt 等）
+├── tokenizer/
+│   ├── merges.txt
+│   ├── tokenizer.json
+│   ├── tokenizer_config.json
+│   └── vocab.json
+└── audio_model/                    # 仅桌面端需要（Android 用系统语音识别）
+```
+
+- **资源来源**：桌面端从启智社区 openi 下载数据集 `enter/vectorstore`、`enter/QwenTokenizer`（`enter/Paraformer` 仅桌面）后，随包打入 APK。
+- **`model.onnx` 导出（rag 在 Android 可用的前提）**：桌面端把 embedding 模型（`pytorch_model.bin`，bge-base-zh-v1.5）用 sentence-transformers / optimum 导出为 ONNX（**pooling 与 normalize 需内置于图中**），命名为 `model.onnx` 放入 `vectorstore/embedding_model/`。缺失时 `rag.main()` 会明确报错。
+- 解压目标即 `APPDATA_DIR` 环境变量指向处（与 6.3 一致）。
+
+### 6.3 环境变量注入
+
+宿主 APP 在启动 Python 前注入：
+
+| 变量 | 必填 | 值 |
+|---|---|---|
+| `APPDATA_DIR` | ✅ | 解压后的资源根目录（6.2 的目录结构） |
+| `RAG_QUERY` | 每次调用 rag | 查询文本（语音识别结果 / 用户输入） |
+
+serious_python 参考（Flutter 端实现）：
+
+```dart
+final p = ProcessRunner(
+  script: ProcessScript.python(executable: pythonExecutable),
+);
+// 运行 rag（env 传入 APPDATA_DIR 与 RAG_QUERY）
+await p.run(
+  ProcessScript.pythonModule(moduleName: "python.rag", args: []),
+  env: {"APPDATA_DIR": appDataDir, "RAG_QUERY": query},
+  workingDirectory: pythonRoot,
+);
+```
+
+### 6.4 流水线调用顺序
+
+1. **取文本**：Android 用系统语音识别（`SpeechRecognizer`）或用户输入得到查询文本；
+2. **rag**：`python -m python.rag`（env 带 `RAG_QUERY`）→ 产出 `pipeline/rag_result.json`；
+3. **build**：`python -m python.build` → 产出 `pipeline/prompt.txt`；
+4. **tokenize**：`python -m python.tokenize` → 产出 `pipeline/model_inputs.pkl`；
+5. **推理**：读取 `model_inputs.pkl`（`pickle.load`），通过服务端链路发送给大模型推理。
+
+注意：必须以 `-m python.xxx` 方式在仓库根目录运行（`python/` 是包，见 2.1）。
+
+### 6.5 打包前核对清单
+
+- [ ] `requirements.txt` 版本保持钉版（numpy==2.4.6 / faiss-cpu==1.14.3 / onnxruntime==1.27.0）
+- [ ] `vectorstore/embedding_model/model.onnx` 已导出并随包
+- [ ] `vectorstore/`、`tokenizer/` 完整随包，解压后结构符合 6.2
+- [ ] `APPDATA_DIR` / `RAG_QUERY` 注入逻辑已实现
+- [ ] 构建用 Python 3.14（或 3.12），与镜像 android wheel 匹配
+
+---
+
+## 7. 测试
+
+### 7.1 运行方式
 
 ```bash
 conda activate ChatLaw_env
@@ -173,7 +339,7 @@ python python_test/test_client_modules.py
 
 脚本不依赖 pytest，纯 `assert` + 显式 `[PASS] / [FAIL] / [SKIP]` 输出；存在失败用例时以非零退出码结束，并打印具体差异。
 
-### 测试内容
+### 7.2 测试内容
 
 | 分区 | 覆盖内容 | 说明 |
 |---|---|---|
@@ -182,12 +348,13 @@ python python_test/test_client_modules.py
 | 2. 懒加载验证 | import 后各资源缓存为空 | 校验 `_vectorstore` / `_exact_index` / `_law_name_candidates` / `_audio_model` / `_tokenizer` 均为 `None` |
 | 3. 法条解析纯逻辑 | `normalize_law_name` / `normalize_article_number` / `parse_law_article_query` | 精确解析与无关问题两种场景 |
 | 4. `rag.main` 全链路 | 混合检索编排 + 自动保存 JSON | 设 `RAG_QUERY` 后走真实 `main()` 入口：精确命中 → 2 条、未命中 → faiss 5 条；校验 `pipeline/rag_result.json` 的生成、schema、来源标记与覆盖行为 |
+| 4b. `_OnnxEmbeddings` | onnxruntime 向量嵌入 | 用微型 ONNX 模型验证 `_embed` / `embed_query` / `embed_documents`，及缺 `model.onnx` 时明确报错 |
 | 5. `build.main` 文件链 | prompt 构造 | 写入 `rag_result.json` 后走真实 `main()`：校验返回 prompt 与 `prompt.txt` 内容，含空 docs 兜底 |
-| 6. `asr.run` 全链路 | 语音转文字编排 + 落盘 | 替换 `_get_audio_model()` 为假模型 + 1 秒合成正弦波音频，校验识别文本与 `asr_result.txt` 内容；测试后自动清理缓存与 pipeline 产物 |
+| 6. `asr.run` 全链路 | 语音转文字编排 + 落盘 + 重采样 | 替换 `_get_audio_model()` 为假模型 + 1 秒合成正弦波音频，校验识别文本与 `asr_result.txt` 内容，并验证非 16k 采样率下 `_resample()` 重采样路径；测试后自动清理缓存与 pipeline 产物 |
 | 7. `tokenize.main` 文件链 | 分词编排 + pickle 落盘 | 写入 `prompt.txt` 后走真实 `main()`（mock tokenizer）：校验返回、`model_inputs.pkl` 可反序列化、chat 模板套用参数 |
 | 8. 真实资源端到端 | `resources/` 已下载时执行 | 设 `RAG_QUERY` 后 `rag.main()` 真实检索、`tokenize.main()` 真实分词；资源缺失时显式 `[SKIP]`（资源在首次实际调用时自动下载，测试不代为下载） |
 
-### 设计要点
+### 7.3 设计要点
 
 - **mock 的是懒加载函数而非业务函数**：测试替换各模块的 `_get_*()` 懒加载函数为假资源，直接走真实 `main()`/`run()` 入口及其内部编排，验证的是入口完整链路与文件链产物。
 - 真实资源（`APPDATA_DIR` 指向的资源根，未设置时为 `<仓库根>/resources/`）下载完成后重跑脚本，第 8 区会自动升级为真实端到端测试。

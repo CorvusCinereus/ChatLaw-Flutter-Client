@@ -3,9 +3,11 @@
 
 将客户端流水线中的「RAG 检索」环节整理为独立模块：
 - 所需函数原样搬入本文件，不依赖原 ChatLaw 仓库代码，可独立运行。
-- 资源（FAISS 向量库、精确索引、法条名候选）采用首次调用 run() 时懒加载并缓存，
+- 资源（FAISS 向量库、精确索引、法条名候选）采用首次调用 main() 时懒加载并缓存，
   缺失时通过启智社区（openi）自动下载到资源根目录（APPDATA_DIR 或回退的 <仓库根>/resources/）。
-- 对外只暴露一个统一入口 run()，一次调用即可完成整个检索环节。
+- 向量嵌入基于 onnxruntime（_OnnxEmbeddings，无 torch 依赖，Android 可用）；
+  需要 {资源根}/vectorstore/embedding_model/model.onnx（桌面端导出后随资源打包）。
+- 对外只暴露一个统一入口 main()，一次调用即可完成整个检索环节。
 """
 
 import os
@@ -14,7 +16,6 @@ import json
 import sys
 import time
 
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 
 
@@ -182,15 +183,53 @@ def parse_law_article_query(query: str, law_name_candidates=None):
     return law_name, article
 
 
+class _OnnxEmbeddings:
+    """
+    基于 onnxruntime 的向量嵌入（Android 可用，无 torch / sentence-transformers 依赖）。
+
+    模型约定：{资源根}/vectorstore/embedding_model/model.onnx
+    - 输入：input_ids / attention_mask（tokenizers 产出，输入名自动匹配模型声明）
+    - 输出：已池化并归一化的向量，形状 [batch, dim]
+      （用 sentence-transformers/optimum 导出 ONNX 时 pooling 与 normalize 已内置于图内）
+    tokenizer 直接复用资源目录中的 tokenizer 文件（transformers 快速分词）。
+    """
+
+    def __init__(self, model_path, tokenizer_dir):
+        import onnxruntime
+        self._session = onnxruntime.InferenceSession(model_path)
+        from transformers import AutoTokenizer
+        self._tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_dir, use_fast=True, local_files_only=True
+        )
+        self._input_names = [i.name for i in self._session.get_inputs()]
+
+    def _embed(self, text):
+        enc = self._tokenizer(
+            [text], padding=True, truncation=True, max_length=512, return_tensors="np"
+        )
+        feeds = {name: enc[name] for name in self._input_names if name in enc}
+        output = self._session.run(None, feeds)[0]
+        return output[0].astype(float).tolist()
+
+    def embed_query(self, text):
+        return self._embed(text)
+
+    def embed_documents(self, texts):
+        return [self._embed(t) for t in texts]
+
+
 def load_vectorstore(path):
-    embeddings = HuggingFaceEmbeddings(
-        model_name=os.path.join(
-            _get_resources_path(),
-            "vectorstore",
-            "embedding_model"
-        ),
-        encode_kwargs={"normalize_embeddings": True},
+    embedding_dir = os.path.join(
+        _get_resources_path(), "vectorstore", "embedding_model"
     )
+    onnx_path = os.path.join(embedding_dir, "model.onnx")
+    if not os.path.isfile(onnx_path):
+        raise FileNotFoundError(
+            f"缺少 ONNX 嵌入模型: {onnx_path}\n"
+            "请在桌面端把 embedding 模型（pytorch_model.bin）导出为 ONNX 后放入该目录；"
+            "或开发环境手动 pip install langchain-huggingface sentence-transformers 以使用 torch 版。"
+        )
+    embeddings = _OnnxEmbeddings(onnx_path, embedding_dir)
 
     vectorstore = FAISS.load_local(
         path,
