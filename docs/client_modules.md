@@ -139,7 +139,7 @@ APP 侧典型编排：
 
 ### 4.3 `build.main`
 
-- **功能**：Prompt 构建环节的统一入口。从 `{APPDATA_DIR}/pipeline/rag_result.json` 读取 `query` 与 `results`，把用户问题与检索到的法律条文拼装成最终推理 prompt（含系统法律助手设定、【参考法条】上下文、【用户问题】两段结构 + 问题正文），写入 `{APPDATA_DIR}/pipeline/prompt.txt`。
+- **功能**：Prompt 构建环节的统一入口。从 `{APPDATA_DIR}/pipeline/rag_result.json` 读取 `query` 与 `results`，把用户问题与检索到的法律条文拼装成最终推理 prompt（含系统法律咨询设定、【法律条文】上下文、【问题】、【回答】四段结构），写入 `{APPDATA_DIR}/pipeline/prompt.txt`。
 - **输入（文件）**：`{APPDATA_DIR}/pipeline/rag_result.json`（由 `rag.main()` 生成），缺失时打印错误并以退出码 1 结束。
   - `question` = 文件中的 `query` 字段；
   - `docs` = 文件中的 `results` 列表（已归一化记录，含 `law_name` / `article` / `content` / `source`，直接兼容 `_format_doc_block` 的 dict 分支）。
