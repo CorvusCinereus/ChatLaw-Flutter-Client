@@ -69,7 +69,7 @@ class _SettingPageState extends State<SettingPage> {
         Text('服务器', style: Theme.of(context).textTheme.titleSmall),
         const SizedBox(height: AppSpacing.xs),
         Text(
-          '管理对话所要连接的服务端地址。',
+          '管理对话所要连接的服务器 IP（端口由服务端固定）。',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: AppSpacing.md),

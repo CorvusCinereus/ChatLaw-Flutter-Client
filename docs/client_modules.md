@@ -139,7 +139,7 @@ APP 侧典型编排：
 
 ### 4.3 `build.main`
 
-- **功能**：Prompt 构建环节的统一入口。从 `{APPDATA_DIR}/pipeline/rag_result.json` 读取 `query` 与 `results`，把用户问题与检索到的法律条文拼装成最终推理 prompt（含系统法律咨询设定、【法律条文】上下文、【问题】、【回答】四段结构），写入 `{APPDATA_DIR}/pipeline/prompt.txt`。
+- **功能**：Prompt 构建环节的统一入口。从 `{APPDATA_DIR}/pipeline/rag_result.json` 读取 `query` 与 `results`，把用户问题与检索到的法律条文拼装成最终推理 prompt（含系统法律助手设定、【参考法条】上下文、【用户问题】两段结构 + 问题正文），写入 `{APPDATA_DIR}/pipeline/prompt.txt`。
 - **输入（文件）**：`{APPDATA_DIR}/pipeline/rag_result.json`（由 `rag.main()` 生成），缺失时打印错误并以退出码 1 结束。
   - `question` = 文件中的 `query` 字段；
   - `docs` = 文件中的 `results` 列表（已归一化记录，含 `law_name` / `article` / `content` / `source`，直接兼容 `_format_doc_block` 的 dict 分支）。
@@ -393,27 +393,30 @@ python python_test/test_client_modules.py
 | 文件 | 职责 |
 |---|---|
 | `lib/internal/python_env.dart` | 桥接配置常量：`kPythonExe`（Python 解释器路径，默认本机 ChatLaw_env）、`kAppDataDir`（= APPDATA_DIR，默认 `D:\dev\chatlaw_android_resources`）、`kRepoRootOverride`（仓库根，空则取 `Directory.current`）。**部署/换机时替换这些常量** |
-| `lib/services/chat_pipeline.dart` | `ChatPipeline`：`runRag(question)`（真实 RAG，解析 `rag_result.json` 返回 `RagDoc[]`）、`runBuild()`、`runTokenize()`；均以 `Process.run(python, ['-m', 'python.xxx'])` 执行，cwd=仓库根，env 注入 `APPDATA_DIR`/`RAG_QUERY`。失败抛 `PipelineException`（含 stderr 摘要）。`ChatPipeline.debugOverride` 供 widget 测试注入假实现 |
-| `lib/services/mock_answer.dart` | `buildVirtualAnswer(query, docs)`：推理服务器未接入时的虚拟回答文本（引用真实检索条文并注明为演示输出） |
+| `lib/services/chat_pipeline.dart` | `ChatPipeline`：`runRag(question)`（真实 RAG，解析 `rag_result.json` 返回 `RagDoc[]`）、`runBuild()`、`runTokenize()`（返回发往推理服务器的 pickle 负载字节）。Android 走内嵌 HTTP 服务（`/rag`、`/build`、`/tokenize`），桌面走 `Process.run(python, ['-m', 'python.xxx'])`。失败抛 `PipelineException`（含 stderr 摘要）。`ChatPipeline.debugOverride` 供 widget 测试注入假实现 |
+| `lib/services/pickle_codec.dart` | 解析服务端 `/infer` 的分帧 pickle 响应：每帧 = 8 字节大端长度 + pickle 数据，内容为文本增量，`<END>` 为结束帧、`[ServerError] ...` 为错误帧。仅需解码（请求方向的 pickle 由设备端内嵌 Python 生成） |
+| `lib/services/inference_client.dart` | `InferenceClient`：`checkHealth()`（POST 数据端口 `/health`）、`infer(payload)`（心跳端口 6005 持续 PING + 数据端口 6006 `POST /infer`，流式产出文本增量）。`InferenceClient.debugOverride` 供 widget 测试注入 |
 
 ### 8.2 ChatPage 驱动方式
 
 `_sendMessage` → `_startProgress(question)`（替换原定时模拟体）：
 
 1. `runRag` 真实完成 → 把每条结果的 `《law_name》article` 填入检索面板 `_caches`、`content` 填入 `_details` → 进度条步骤 1
-2. `runBuild` 真实完成 → 步骤 2；`runTokenize` 真实完成 → 步骤 3
-3. 推理步骤 → `_history.add({"role": "assistant", "content": buildVirtualAnswer(...)})`，由既有气泡渲染（**未接服务器，输出为虚拟文本**）
-4. 收尾持久化：`_addHistory`（含 assistant 消息）、`_addCache`（真实检索条文）；失败时渲染错误气泡并持久化
+2. `runBuild` 真实完成 → 步骤 2；`runTokenize` 真实完成 → 步骤 3（同时得到发往推理服务器的 pickle 负载）
+3. 推理步骤 → 先 `InferenceClient.checkHealth()` 确认数据端口可达，再 `POST /infer` **流式接收**模型输出，随增量刷新 assistant 气泡 → 步骤 4
+4. 收尾持久化：`_addHistory`（含 assistant 消息）、`_addCache`（真实检索条文）；失败时渲染错误气泡（推理中途失败则保留已收到的内容并标注中断）并持久化
 
 ### 8.3 测试
 
 - `test/chat_pipeline_real_test.dart`：**真实端到端**——外部 python + 真实资源跑通 runRag/runBuild/runTokenize（本机需满足 python_env.dart 配置）
-- `test/chat_page_flow_test.dart`：widget 测试——注入假 `ChatPipeline` 验证发送后检索法条落位面板、assistant 虚拟回答气泡、持久化回调、失败容错
+- `test/chat_page_flow_test.dart`：widget 测试——注入假 `ChatPipeline` 与假 `InferenceClient`，验证发送后检索法条落位抽屉、assistant 流式回答气泡、持久化回调、失败容错
+- `test/pickle_codec_test.dart`：分帧 pickle 解析（含真实 Python 产出的字节样例、分包到达、错误帧）
+- `test/inference_client_test.dart`：对本地 HttpServer 模拟服务端，验证健康检查、心跳 PING、`/infer` 请求体与内容长度、流式分帧解码
 
 ### 8.4 后续替换路径
 
-- **接入 serious_python（Android 内嵌）**：改写 `ChatPipeline` 三方法的调用实现（serious_python 需以 main.py 服务形式驱动，其 Dart API 为 `SeriousPython.run()`，无 ProcessRunner），UI 与调用点不变
-- **接入推理服务器**：步骤 4 由虚拟文本改为发送 `model_inputs.pkl` 到服务器并渲染真实回答（替换 `mock_answer.dart` 的调用）
+- **接入 serious_python（Android 内嵌）**：已实现——`ChatPipeline` 在 `Platform.isAndroid` 分支改走内嵌 `main.py` HTTP 服务，UI 与调用点不变
+- **接入推理服务器**：已实现——步骤 4 发送分词产出的 pickle 负载到 `SERVER_IP:6006/infer` 并流式渲染真实回答
 
 ---
 
@@ -426,12 +429,14 @@ Flutter App (Android)
  ├─ lib/main.dart: SeriousPython.run(main.py)（后台线程；首次启动解包 app.zip 到
  │   <filesDir>/flet/app，含 main.py + python/ 包 + resources/ 514MB）
  ├─ ChatPipeline（Platform.isAndroid 分支）→ HTTP POST http://127.0.0.1:18765
- └─ 解析响应 docs → 既有检索面板/虚拟回答气泡（UI 零改动）
+ ├─ InferenceClient → 心跳 POST 6005/heartbeat；数据 POST 6006/health、6006/infer
+ └─ 解析响应 docs → 检索抽屉；/infer 流式增量 → assistant 气泡
 内嵌 Python（main.py，ThreadingHTTPServer，端口 18765 与 Dart 端 kPythonServicePort 一致）
  ├─ /rag      → os.environ['RAG_QUERY']=question → rag.main() → 回读
  │              pipeline/rag_result.json 返回 {ok, docs[]}
  ├─ /build    → build.main()
- └─ /tokenize → tokenize.main()
+ ├─ /tokenize → tokenize.main() → 回传 {ok, payload_b64}（普通 dict + numpy 数组的 pickle）
+ │              Dart 端 base64 解码后原样转发给推理服务器 6006/infer
  APPDATA_DIR 启动时设为 <app根>/resources（模块资源根约定）
 ```
 

@@ -121,11 +121,23 @@ class _ServerPageState extends State<ServerPage> {
 
   String? _validateAddress(String? value) {
     final v = (value ?? '').trim();
-    if (v.isEmpty) return '请填写服务器地址';
-    if (!v.startsWith('http://') && !v.startsWith('https://')) {
-      return '请填写完整地址（以 http:// 或 https:// 开头）';
+    if (v.isEmpty) return '请填写服务器 IP';
+    if (v.contains('://') || v.contains('/')) {
+      return '只需填写 IP 或主机名，不要带 http:// 或路径';
     }
-    return null;
+    if (v.contains(':')) {
+      return '端口由服务端固定（6005/6006），无需填写';
+    }
+    final ipv4 = RegExp(r'^(\d{1,3})(\.\d{1,3}){3}$');
+    final hostname = RegExp(r'^[A-Za-z0-9][A-Za-z0-9.\-]*$');
+    if (ipv4.hasMatch(v)) {
+      if (v.split('.').any((part) => int.parse(part) > 255)) {
+        return 'IP 每段取值应在 0-255 之间';
+      }
+      return null;
+    }
+    if (hostname.hasMatch(v)) return null;
+    return 'IP 或主机名格式不正确';
   }
 
   @override
@@ -175,14 +187,14 @@ class _ServerPageState extends State<ServerPage> {
                       const SizedBox(height: AppSpacing.lg),
                       TextFormField(
                         controller: _addressController,
-                        keyboardType: TextInputType.url,
                         textInputAction: TextInputAction.done,
                         style: textStyle,
                         onFieldSubmitted: (_) => _save(),
                         decoration: const InputDecoration(
-                          labelText: '服务器地址',
-                          hintText: '例如：http://localhost:8080',
-                          prefixIcon: Icon(Icons.link_rounded),
+                          labelText: '服务器 IP',
+                          hintText: '例如：192.168.137.99',
+                          prefixIcon: Icon(Icons.dns_outlined),
+                          helperText: '端口由服务端固定（心跳 6005 / 数据 6006）',
                         ),
                         validator: _validateAddress,
                       ),

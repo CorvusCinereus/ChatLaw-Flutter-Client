@@ -4,6 +4,8 @@
 // 说明：Flutter 在布局溢出时会抛出渲染异常并导致测试失败，因此该测试可有效
 // 兜住「元素比例失衡 / 溢出」这类问题，无需真机即可回归。
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -16,6 +18,7 @@ import 'package:chatlaw/pages/server_page.dart';
 import 'package:chatlaw/pages/setting_page.dart';
 import 'package:chatlaw/pages/start_page.dart';
 import 'package:chatlaw/services/chat_pipeline.dart';
+import 'package:chatlaw/services/inference_client.dart';
 
 const _phone = Size(390, 844);
 const _tablet = Size(1100, 800);
@@ -42,6 +45,15 @@ void _setSize(WidgetTester tester, Size size) {
 void main() {
   final config = _config();
 
+  setUp(() {
+    // 布局测试不触网：注入始终成功、立即返回的假推理客户端
+    InferenceClient.debugOverride = _StubInferenceClient();
+  });
+
+  tearDown(() {
+    InferenceClient.debugOverride = null;
+  });
+
   testWidgets('开始页在手机 / 平板尺寸下不溢出', (tester) async {
     for (final size in [_phone, _tablet]) {
       _setSize(tester, size);
@@ -58,11 +70,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      // 先断言无异常：这样一旦 body 构建失败能直接看到真实异常
+      expect(tester.takeException(), isNull, reason: '$size 下不应有异常');
       expect(find.text('ChatLaw'), findsOneWidget);
-      expect(find.text('选择要咨询的服务'), findsOneWidget);
+      expect(find.text('选择服务器配置'), findsOneWidget);
       expect(find.text('默认'), findsOneWidget);
       expect(find.text('添加服务器'), findsOneWidget);
-      expect(tester.takeException(), isNull, reason: '$size 下不应有异常');
     }
   });
 
@@ -253,5 +266,18 @@ class _IdlePipeline extends ChatPipeline {
   Future<void> runBuild() async {}
 
   @override
-  Future<void> runTokenize() async {}
+  Future<Uint8List> runTokenize() async => Uint8List(0);
+}
+
+/// 假推理客户端：布局测试不触网
+class _StubInferenceClient extends InferenceClient {
+  _StubInferenceClient() : super(host: 'stub');
+
+  @override
+  Future<String?> checkHealth() async => null;
+
+  @override
+  Stream<String> infer(List<int> pickledInputs) async* {
+    yield '（布局测试占位回答）';
+  }
 }

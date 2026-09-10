@@ -13,6 +13,7 @@
 
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:chatlaw/internal/python_env.dart';
 
@@ -143,13 +144,27 @@ class ChatPipeline {
     await _runModule('python.build');
   }
 
-  /// 步骤 3：真实分词（读 prompt.txt → model_inputs.pkl）
-  Future<void> runTokenize() async {
+  /// 步骤 3：真实分词，并返回可直接发给推理服务器的 pickle 负载。
+  ///
+  /// Android：调用内嵌 Python 服务 /tokenize，响应里的 `payload_b64` 即 pickle 字节
+  /// （负载是普通 dict + numpy 数组，由服务端负责转换成 torch 张量）；
+  /// 桌面：外部 Python 子进程写出 {APPDATA_DIR}/pipeline/model_inputs.pkl，直接读文件。
+  Future<Uint8List> runTokenize() async {
     if (Platform.isAndroid) {
-      await _httpPost('/tokenize', const {});
-      return;
+      final body = await _httpPost('/tokenize', const {});
+      final payloadB64 = body['payload_b64'] as String?;
+      if (payloadB64 == null || payloadB64.isEmpty) {
+        throw PipelineException('Python 服务未返回推理负载（payload_b64 缺失）');
+      }
+      return base64Decode(payloadB64);
     }
+
     await _runModule('python.tokenize');
+    final file = File('$appDataDir/pipeline/model_inputs.pkl');
+    if (!file.existsSync()) {
+      throw PipelineException('分词完成但未找到推理负载文件: ${file.path}');
+    }
+    return file.readAsBytesSync();
   }
 
   /// Android：调用内嵌 Python HTTP 服务（main.py，serious_python 内嵌）

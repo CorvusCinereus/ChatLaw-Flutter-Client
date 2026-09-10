@@ -16,6 +16,7 @@ import os
 import sys
 import pickle
 
+import numpy as np
 from transformers import AutoTokenizer
 
 
@@ -97,16 +98,47 @@ def _get_tokenizer():
     return _tokenizer
 
 
+def build_model_inputs(final_prompt):
+    """
+    对最终 prompt 套用 chat 模板并分词，返回推理负载。
+
+    负载是**普通 dict**（而非 transformers 的 BatchEncoding），值为 numpy 数组：
+
+        {"input_ids": np.ndarray, "attention_mask": np.ndarray}
+
+    这样两端都只依赖 numpy：
+    - Android 端无 torch，numpy 是唯一可行的张量实现；
+    - 服务端（server_pt）通过 chatlaw.network.tensor_utils 把 numpy 转成 torch 张量；
+    - 同时避免了跨端 pickle 一个 transformers 类对象带来的版本兼容风险。
+
+    Args:
+        final_prompt: 已构建好的最终 prompt 文本。
+
+    Returns:
+        dict: {"input_ids": np.ndarray, "attention_mask": np.ndarray}
+    """
+    tokenizer = _get_tokenizer()
+    messages = [{"role": "user", "content": final_prompt}]
+    templated = tokenizer.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True
+    )
+    encoded = tokenizer([templated], return_tensors="np")
+    return {
+        "input_ids": np.asarray(encoded["input_ids"]),
+        "attention_mask": np.asarray(encoded["attention_mask"]),
+    }
+
+
 def main():
     """
     分词模块的统一入口，一次调用完成 chat 模板套用 + 分词。
 
     输入读取 {APPDATA_DIR}/pipeline/prompt.txt（由 build.main() 生成）；
     输出以 pickle 序列化写入 {APPDATA_DIR}/pipeline/model_inputs.pkl
-    （return_tensors 固定为 "pt"，对应 Transformers 服务端）。
+    （普通 dict + numpy 数组，可直接发送给服务端 /infer）。
 
     Returns:
-        model_inputs: 可直接发送给服务端的模型输入。
+        dict: 推理负载 {"input_ids": np.ndarray, "attention_mask": np.ndarray}
     """
     in_path = os.path.join(_get_pipeline_dir(), "prompt.txt")
     if not os.path.isfile(in_path):
@@ -116,15 +148,7 @@ def main():
     with open(in_path, "r", encoding="utf-8") as f:
         final_prompt = f.read()
 
-    tokenizer = _get_tokenizer()
-
-    messages = [{"role": "user", "content": final_prompt}]
-    templated = tokenizer.apply_chat_template(
-        messages, tokenize=False, add_generation_prompt=True
-    )
-    # return_tensors="np"：Android 环境无 torch（Android 端不安装 torch），
-    # 用 numpy 张量（BatchEncoding），服务端 pickle.load 后可正常读取 input_ids 等。
-    model_inputs = tokenizer([templated], return_tensors="np")
+    model_inputs = build_model_inputs(final_prompt)
 
     out_path = os.path.join(_get_pipeline_dir(), "model_inputs.pkl")
     try:
@@ -143,5 +167,6 @@ if __name__ == "__main__":
 
 __all__ = [
     "main",
+    "build_model_inputs",
     "_get_tokenizer",
 ]

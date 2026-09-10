@@ -20,8 +20,10 @@ ChatLaw 内嵌 Python 服务入口（Android serious_python / 桌面均可运行
 """
 
 import argparse
+import base64
 import json
 import os
+import pickle
 import sys
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -242,10 +244,19 @@ class _Handler(BaseHTTPRequestHandler):
             return self._send(200, {"ok": True, "step": "build"})
 
         if self.path == "/tokenize":
-            # tokenize.main() 返回 BatchEncoding（含 numpy 张量），不可 JSON 序列化；
-            # 产物已写盘 model_inputs.pkl，HTTP 仅返回步骤标识。
-            _get_modules()[2].main()
-            return self._send(200, {"ok": True, "step": "tokenize"})
+            # tokenize.main() 返回推理负载（普通 dict + numpy 数组），不可 JSON 序列化；
+            # 把 pickle 后的字节以 base64 回传，供 Dart 端原样转发给推理服务器 /infer
+            # （Android 端无 torch，由服务端负责 numpy → torch 张量转换）。
+            payload = _get_modules()[2].main()
+            body = pickle.dumps(payload)
+            return self._send(
+                200,
+                {
+                    "ok": True,
+                    "step": "tokenize",
+                    "payload_b64": base64.b64encode(body).decode("ascii"),
+                },
+            )
 
         return self._send(404, {"ok": False, "error": f"未知端点 {self.path}"})
 

@@ -4,6 +4,7 @@
  * @author CorvusCinereus
  */
 
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -15,12 +16,18 @@ import 'package:record/record.dart';
 import '../internal/config.dart';
 import '../internal/design.dart';
 import '../services/chat_pipeline.dart';
-import '../services/mock_answer.dart';
+import '../services/inference_client.dart';
 import 'dialog.dart';
 import 'page_index.dart';
 
 /// 流水线步骤（与 _step 的 0..4 对应）
 const List<String> _kSteps = ['RAG检索', '构建提示词', '分词', '推理'];
+
+/// 等待模型首个增量时的占位文案
+const String _kGeneratingHint = '正在生成…';
+
+/// 流式刷新节流（毫秒）：过密会掉帧，过疏会显得不"流式"
+const int _kStreamFlushMs = 60;
 
 /// 「回车发送」意图（多行输入框默认把回车当换行，这里显式改绑为发送）
 class _SendMessageIntent extends Intent {
@@ -65,6 +72,13 @@ class _ChatPageState extends State<ChatPage> {
   bool _recording = false;
   AudioRecorder? _record;
 
+  /// 用户是否请求中止本轮生成
+  bool _stopRequested = false;
+
+  /// 正在进行的推理流（用于中止）
+  StreamSubscription<String>? _inferSub;
+  Completer<void>? _inferCompleter;
+
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
 
@@ -90,6 +104,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _inferSub?.cancel();
     _record?.dispose();
     _messageController.dispose();
     _scrollController.dispose();
@@ -135,15 +150,18 @@ class _ChatPageState extends State<ChatPage> {
   Future<void> _startProgress(String question) async {
     if (_pipelineRunning) return;
     _pipelineRunning = true;
+    _stopRequested = false;
     setState(() => _step = 0);
 
     final pipeline = ChatPipeline.debugOverride ?? ChatPipeline();
     List<RagDoc> docs = [];
+    var assistantIndex = -1;
 
     try {
       // 步骤 1：真实 RAG 检索
       docs = await pipeline.runRag(question);
       if (!mounted) return;
+      if (_abortIfRequested()) return;
       setState(() {
         _caches = docs.map((d) => d.title).toList();
         _details = docs.map((d) => d.content).toList();
@@ -153,41 +171,162 @@ class _ChatPageState extends State<ChatPage> {
       // 步骤 2：构建 prompt
       await pipeline.runBuild();
       if (!mounted) return;
+      if (_abortIfRequested()) return;
       setState(() => _step = 2);
 
-      // 步骤 3：分词
-      await pipeline.runTokenize();
+      // 步骤 3：分词，得到发给推理服务器的 pickle 负载
+      final payload = await pipeline.runTokenize();
       if (!mounted) return;
+      if (_abortIfRequested()) return;
       setState(() => _step = 3);
 
-      // 步骤 4：推理（服务器未接入，用虚拟文本）
-      await Future<void>.delayed(const Duration(milliseconds: 350));
+      // 步骤 4：真实推理（流式）
+      final client =
+          InferenceClient.debugOverride ?? InferenceClient(host: _serverHost);
+
+      final healthError = await client.checkHealth();
       if (!mounted) return;
+      if (_abortIfRequested()) return;
+      if (healthError != null) {
+        throw PipelineException(healthError);
+      }
+
+      // 先占位一条 assistant 消息，随后按流式增量刷新
       setState(() {
-        _step = 4;
-        _history.add({
-          'role': 'assistant',
-          'content': buildVirtualAnswer(question, docs),
-        });
+        _history.add({'role': 'assistant', 'content': _kGeneratingHint});
+        assistantIndex = _history.length - 1;
       });
       _scrollToBottomSoon();
+
+      final buffer = StringBuffer();
+
+      void flush() {
+        if (!mounted) return;
+        setState(() {
+          _history[assistantIndex]['content'] =
+              buffer.isEmpty ? _kGeneratingHint : buffer.toString();
+        });
+        _scrollToBottomSoon();
+      }
+
+      // 用 Timer 合并刷新：密集增量下最多每 _kStreamFlushMs 刷新一次，
+      // 既避免逐块 setState 掉帧，又不依赖墙钟（可被测试稳定推进）。
+      Timer? flushTimer;
+      void scheduleFlush() {
+        if (flushTimer != null) return;
+        flushTimer = Timer(const Duration(milliseconds: _kStreamFlushMs), () {
+          flushTimer = null;
+          flush();
+        });
+      }
+
+      // 用 listen（而非 await for）以便中止：取消订阅会让客户端向服务端发 STOP
+      final completer = Completer<void>();
+      _inferCompleter = completer;
+      _inferSub = client.infer(payload).listen(
+        (delta) {
+          buffer.write(delta);
+          scheduleFlush();
+        },
+        onError: (Object error, StackTrace stack) {
+          if (!completer.isCompleted) completer.completeError(error, stack);
+        },
+        onDone: () {
+          if (!completer.isCompleted) completer.complete();
+        },
+        cancelOnError: true,
+      );
+
+      try {
+        await completer.future;
+      } finally {
+        flushTimer?.cancel();
+        flushTimer = null;
+        final sub = _inferSub;
+        _inferSub = null;
+        _inferCompleter = null;
+        // 不 await：流正常结束时 async* 生成器的 cancel() future 不保证完成，
+        // 而此处也无需等待——取消本身已足够（中止场景会触发客户端发送 STOP）。
+        if (sub != null) unawaited(sub.cancel());
+      }
+
+      if (!mounted) return;
+      final aborted = _stopRequested;
+      final text = buffer.toString();
+      setState(() {
+        if (aborted) {
+          _history[assistantIndex]['content'] =
+              text.isEmpty ? '（已中止生成）' : '$text\n\n（已中止生成）';
+        } else {
+          _history[assistantIndex]['content'] =
+              text.isEmpty ? '（模型未返回内容）' : text;
+        }
+        _step = 4;
+      });
+      _scrollToBottomSoon();
+
       widget.addHistory({'name': _historyName, 'history': _history});
       if (_caches.isNotEmpty) {
         widget.addCache(LawCache(_historyName, _caches, _details));
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _history.add({
-          'role': 'assistant',
-          'content': '⚠️ 流水线执行失败：$e',
+      if (assistantIndex == -1) {
+        // 推理尚未开始（检索/构建/分词/连通性失败）
+        setState(() {
+          _history.add({
+            'role': 'assistant',
+            'content': '⚠️ 流水线执行失败：$e',
+          });
         });
-      });
+      } else {
+        // 推理中途失败：保留已收到的内容并标注中断
+        final partial = _history[assistantIndex]['content'] as String? ?? '';
+        final hasText = partial.isNotEmpty && partial != _kGeneratingHint;
+        setState(() {
+          _history[assistantIndex]['content'] = hasText
+              ? '$partial\n\n⚠️ 推理中断：$e'
+              : '⚠️ 推理失败：$e';
+        });
+      }
       _scrollToBottomSoon();
       widget.addHistory({'name': _historyName, 'history': _history});
     } finally {
+      _inferSub = null;
+      _inferCompleter = null;
       if (mounted) setState(() => _pipelineRunning = false);
     }
+  }
+
+  /// 中止当前生成。
+  ///
+  /// 取消推理流会触发客户端向服务端发送一次 STOP（见 InferenceClient.infer 的
+  /// finally），从而让服务端停止继续生成。
+  void _stopGeneration() {
+    if (!_pipelineRunning) return;
+    _stopRequested = true;
+    final completer = _inferCompleter;
+    if (completer != null && !completer.isCompleted) completer.complete();
+    _inferSub?.cancel();
+  }
+
+  /// 步骤之间检查是否已被中止；是则补一条中止提示并让调用方提前返回
+  bool _abortIfRequested() {
+    if (!_stopRequested) return false;
+    setState(() {
+      _history.add({'role': 'assistant', 'content': '（已中止生成）'});
+    });
+    _scrollToBottomSoon();
+    return true;
+  }
+
+  /// 当前会话对应的服务器 IP（端口由服务端固定）
+  String get _serverHost {
+    final servers = widget.appConfig.serverConfigs;
+    if (_serverIndex >= 0 && _serverIndex < servers.length) {
+      return servers[_serverIndex].host;
+    }
+    return widget.serverName;
   }
 
   void _newConversation() {
@@ -656,9 +795,19 @@ class _ChatPageState extends State<ChatPage> {
           ValueListenableBuilder<TextEditingValue>(
             valueListenable: _messageController,
             builder: (context, value, _) {
-              final canSend = value.text.trim().isNotEmpty &&
-                  !_pipelineRunning &&
-                  !_recording;
+              // 生成中：发送键变为停止键，便于中断长回答
+              if (_pipelineRunning) {
+                return IconButton.filled(
+                  tooltip: '停止生成',
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.danger,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: _stopGeneration,
+                  icon: const Icon(Icons.stop),
+                );
+              }
+              final canSend = value.text.trim().isNotEmpty && !_recording;
               return IconButton.filled(
                 tooltip: '发送',
                 onPressed: canSend ? _onSendPressed : null,

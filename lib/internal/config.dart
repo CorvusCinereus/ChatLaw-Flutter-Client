@@ -77,14 +77,34 @@ class AppConfig {
   }
 }
 
+/// 服务器默认 IP（与 chatlaw/config.yaml 的 SERVER_IP 默认值保持一致）
+///
+/// 端口由服务端固定（心跳 6005 / 数据 6006），客户端只需填写 IP。
+const String kDefaultServerHost = '192.168.137.99';
+
 class ServerConfig {
   String name;
+
+  /// 服务器 IP / 主机名。兼容历史上存成 URL 的形式，取值请用 [host]。
   String address;
 
   ServerConfig(this.name, this.address);
 
   factory ServerConfig.defaultConfig() =>
-      ServerConfig('默认', 'http://localhost:8080');
+      ServerConfig('默认', kDefaultServerHost);
+
+  /// 仅取主机部分：兼容旧配置存成 `http://host:port/...` 的情况，
+  /// 端口一律使用服务端固定的 6005/6006。
+  String get host {
+    var s = address.trim();
+    final scheme = s.indexOf('://');
+    if (scheme != -1) s = s.substring(scheme + 3);
+    final slash = s.indexOf('/');
+    if (slash != -1) s = s.substring(0, slash);
+    final colon = s.indexOf(':');
+    if (colon != -1) s = s.substring(0, colon);
+    return s;
+  }
 
   /// @brief 服务器配置转换为 JSON 格式
   /// @return JSON 格式的服务器配置
