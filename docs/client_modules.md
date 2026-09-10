@@ -243,13 +243,31 @@ transformers
 
 本模块面向 **Flet 打包的 Android APK**（Flutter 端嵌入 Python 运行时）。打包方需满足以下需求。
 
-### 6.1 Flet 构建
+### 6.1 构建（serious_python / Flet）
+
+**前置条件**：Flutter SDK（≥3.47）+ Android SDK/NDK + `serious_python: ^4.6.0` 依赖（pubspec）。
+
+#### serious_python 直接打包（实测验证通过）
 
 ```bash
 # 在 chatlaw-flutter-client 仓库根目录执行
-# ★ 必须指定 --arch arm64-v8a：onnxruntime 在 pypi.flet.dev 镜像只有
-#   arm64_v8a / x86_64 的 android wheel；构建 armeabi-v7a 会在 pip 阶段报
-#   "No matching distribution found for onnxruntime"
+export SERIOUS_PYTHON_VERSION=3.14
+export SERIOUS_PYTHON_APP="<暂存目录，如 build/app_staging>"   # Android 打包必需
+dart run serious_python:main package <python_app_dir> -p Android \
+  --arch arm64-v8a \
+  --requirements=-r --requirements=python/requirements.txt
+```
+
+关键点（均实测确认）：
+
+- **`--arch arm64-v8a` 必须指定**：serious_python 会按架构逐个跑 pip；onnxruntime 在 pypi.flet.dev 镜像只有 `arm64_v8a` / `x86_64` 的 android wheel，不指定时构建 `armeabi-v7a` 会在 pip 阶段报 `No matching distribution found for onnxruntime`。
+- **requirements 文件要拆成两个值传**：`--requirements=-r --requirements=python/requirements.txt`（serious_python 把每个 `-r` 值原样追加为 pip 参数，只传文件路径会被当作包名报 `Invalid requirement`）。
+- **`SERIOUS_PYTHON_APP` 必须设置**：Android 打包需要 app 暂存目录（stage 解包后的应用），缺失报 `SERIOUS_PYTHON_APP environment variable must be set`。
+- 产物：依赖装到 `build/site-packages/arm64-v8a/`（含 Android 原生 `.so`），app 暂存到 `SERIOUS_PYTHON_APP`，供后续 `flutter build apk` 的 Gradle 步骤嵌入。
+
+#### Flet 构建
+
+```bash
 flet build apk --arch arm64-v8a
 # 旧版 Flet（<0.86）需同时指定 Python 3.12：
 flet build apk --arch arm64-v8a --python-version 3.12
@@ -257,7 +275,7 @@ flet build apk --arch arm64-v8a --python-version 3.12
 
 - **Python 版本**：默认 3.14 即可。requirements 已移除 `funasr_onnx`（其 `numpy<=1.26.4` 约束曾锁死 Python<=3.12），镜像有 numpy 2.4.6 / faiss-cpu 1.14.3 / onnxruntime 1.27.0 的 **cp314** android wheel。
 - **ABI 限制**：**仅支持 arm64-v8a**（主流 64 位设备）。`armeabi-v7a` 因 onnxruntime 无对应 android wheel 无法构建（`onnxruntime` 是 rag 嵌入的运行时，暂无替代轮子）；如确需 v7a，需另行替换 embedding 运行时并调整依赖。
-- **serious_python 打包**：serious_python 会按 Gradle 的 `ndk.abiFilters` 逐个 ABI 跑 pip 安装 `python/requirements.txt`。必须在 `android/app/build.gradle.kts` 的 `defaultConfig` 中限制 `ndk { abiFilters += listOf("arm64-v8a") }`（本仓库已配置），否则构建 armeabi-v7a 时因 onnxruntime 无 wheel 解析失败。Python ≥ 3.13 起官方已放弃 32 位 Android（PEP 738），仅保留 arm64-v8a / x86_64。
+- **serious_python 经 Flutter 构建时**：会按 Gradle 的 `ndk.abiFilters` 逐个 ABI 跑 pip 安装 `python/requirements.txt`。必须在 `android/app/build.gradle.kts` 的 `defaultConfig` 中限制 `ndk { abiFilters += listOf("arm64-v8a") }`（本仓库已配置），否则构建 armeabi-v7a 时因 onnxruntime 无 wheel 解析失败。Python ≥ 3.13 起官方已放弃 32 位 Android（PEP 738），仅保留 arm64-v8a / x86_64。
 - 构建时 Flet 会自动执行 `pip install --only-binary :all: --extra-index-url https://pypi.flet.dev -r python/requirements.txt`（按 `--arch` 指定的 Android ABI 解析）。
 - **勿改动钉版**：`numpy==2.4.6` 等版本对应镜像 android wheel，升版后 Android 打包可能找不到轮子。
 
@@ -274,7 +292,8 @@ flet build apk --arch arm64-v8a --python-version 3.12
 │   │   ├── index.faiss             # FAISS 向量库
 │   │   └── index.pkl
 │   └── embedding_model/
-│       ├── model.onnx              # ← 需要桌面端导出的 ONNX 嵌入模型（见下）
+│       ├── model.onnx              # ← ONNX 嵌入模型（含 pooling+normalize）
+│       ├── model.onnx.data         # ← ONNX 外部权重（必须与 model.onnx 同目录，onnxruntime 自动加载）
 │       └── …tokenizer 文件（tokenizer.json / tokenizer_config.json / vocab.txt 等）
 ├── tokenizer/
 │   ├── merges.txt
@@ -285,7 +304,8 @@ flet build apk --arch arm64-v8a --python-version 3.12
 ```
 
 - **资源来源**：桌面端从启智社区 openi 下载数据集 `enter/vectorstore`、`enter/QwenTokenizer`（`enter/Paraformer` 仅桌面）后，随包打入 APK。
-- **`model.onnx` 导出（rag 在 Android 可用的前提）**：桌面端把 embedding 模型（`pytorch_model.bin`，bge-base-zh-v1.5）用 sentence-transformers / optimum 导出为 ONNX（**pooling 与 normalize 需内置于图中**），命名为 `model.onnx` 放入 `vectorstore/embedding_model/`。缺失时 `rag.main()` 会明确报错。
+- **`model.onnx` 导出（rag 在 Android 可用的前提）**：把 embedding 模型（bge-base-zh-v1.5，CLS pooling + L2 normalize）导出为 ONNX（**pooling 与 normalize 需内置于图中**）。导出脚本见 `D:\dev\export_embedding_onnx.py`（`conda activate ChatLaw_env` + `python export_embedding_onnx.py <embedding_model_dir>`，已验证 onnxruntime 与 torch 输出一致）。导出产物为 `model.onnx` + `model.onnx.data`（外部权重），**两个文件必须同目录打包**；`pytorch_model.bin` 可删除。缺失时 `rag.main()` 会明确报错。
+- **已实测的资源包**：`D:\dev\chatlaw_android_resources\`（514MB，结构与本节一致），含真实向量库（FAISS 21950 条）+ tokenizer + model.onnx，端到端检索验证通过。
 - 解压目标即 `APPDATA_DIR` 环境变量指向处（与 6.3 一致）。
 
 ### 6.3 环境变量注入
@@ -363,3 +383,98 @@ python python_test/test_client_modules.py
 
 - **mock 的是懒加载函数而非业务函数**：测试替换各模块的 `_get_*()` 懒加载函数为假资源，直接走真实 `main()`/`run()` 入口及其内部编排，验证的是入口完整链路与文件链产物。
 - 真实资源（`APPDATA_DIR` 指向的资源根，未设置时为 `<仓库根>/resources/`）下载完成后重跑脚本，第 8 区会自动升级为真实端到端测试。
+
+---
+
+## 8. Flutter 侧接入（开发期：外部 Python 子进程）
+
+### 8.1 新增的 Dart 文件
+
+| 文件 | 职责 |
+|---|---|
+| `lib/internal/python_env.dart` | 桥接配置常量：`kPythonExe`（Python 解释器路径，默认本机 ChatLaw_env）、`kAppDataDir`（= APPDATA_DIR，默认 `D:\dev\chatlaw_android_resources`）、`kRepoRootOverride`（仓库根，空则取 `Directory.current`）。**部署/换机时替换这些常量** |
+| `lib/services/chat_pipeline.dart` | `ChatPipeline`：`runRag(question)`（真实 RAG，解析 `rag_result.json` 返回 `RagDoc[]`）、`runBuild()`、`runTokenize()`；均以 `Process.run(python, ['-m', 'python.xxx'])` 执行，cwd=仓库根，env 注入 `APPDATA_DIR`/`RAG_QUERY`。失败抛 `PipelineException`（含 stderr 摘要）。`ChatPipeline.debugOverride` 供 widget 测试注入假实现 |
+| `lib/services/mock_answer.dart` | `buildVirtualAnswer(query, docs)`：推理服务器未接入时的虚拟回答文本（引用真实检索条文并注明为演示输出） |
+
+### 8.2 ChatPage 驱动方式
+
+`_sendMessage` → `_startProgress(question)`（替换原定时模拟体）：
+
+1. `runRag` 真实完成 → 把每条结果的 `《law_name》article` 填入检索面板 `_caches`、`content` 填入 `_details` → 进度条步骤 1
+2. `runBuild` 真实完成 → 步骤 2；`runTokenize` 真实完成 → 步骤 3
+3. 推理步骤 → `_history.add({"role": "assistant", "content": buildVirtualAnswer(...)})`，由既有气泡渲染（**未接服务器，输出为虚拟文本**）
+4. 收尾持久化：`_addHistory`（含 assistant 消息）、`_addCache`（真实检索条文）；失败时渲染错误气泡并持久化
+
+### 8.3 测试
+
+- `test/chat_pipeline_real_test.dart`：**真实端到端**——外部 python + 真实资源跑通 runRag/runBuild/runTokenize（本机需满足 python_env.dart 配置）
+- `test/chat_page_flow_test.dart`：widget 测试——注入假 `ChatPipeline` 验证发送后检索法条落位面板、assistant 虚拟回答气泡、持久化回调、失败容错
+
+### 8.4 后续替换路径
+
+- **接入 serious_python（Android 内嵌）**：改写 `ChatPipeline` 三方法的调用实现（serious_python 需以 main.py 服务形式驱动，其 Dart API 为 `SeriousPython.run()`，无 ProcessRunner），UI 与调用点不变
+- **接入推理服务器**：步骤 4 由虚拟文本改为发送 `model_inputs.pkl` 到服务器并渲染真实回答（替换 `mock_answer.dart` 的调用）
+
+---
+
+## 9. Android 运行时架构与构建实测
+
+### 9.1 运行时架构（serious_python 内嵌）
+
+```
+Flutter App (Android)
+ ├─ lib/main.dart: SeriousPython.run(main.py)（后台线程；首次启动解包 app.zip 到
+ │   <filesDir>/flet/app，含 main.py + python/ 包 + resources/ 514MB）
+ ├─ ChatPipeline（Platform.isAndroid 分支）→ HTTP POST http://127.0.0.1:18765
+ └─ 解析响应 docs → 既有检索面板/虚拟回答气泡（UI 零改动）
+内嵌 Python（main.py，ThreadingHTTPServer，端口 18765 与 Dart 端 kPythonServicePort 一致）
+ ├─ /rag      → os.environ['RAG_QUERY']=question → rag.main() → 回读
+ │              pipeline/rag_result.json 返回 {ok, docs[]}
+ ├─ /build    → build.main()
+ └─ /tokenize → tokenize.main()
+ APPDATA_DIR 启动时设为 <app根>/resources（模块资源根约定）
+```
+
+### 9.2 构建实测流程（Windows / Linux 通用）
+
+```bash
+cd chatlaw-flutter-client
+export SERIOUS_PYTHON_VERSION=3.14
+export SERIOUS_PYTHON_SITE_PACKAGES="$(pwd)/build/site-packages"
+export SERIOUS_PYTHON_APP="$(pwd)/build/python-app"
+
+# 1) 组装 app 目录（main.py + python/ 包 + 514MB 资源；资源本地提供不入 git）
+#    build/python_app/{main.py, python/, resources/}
+
+# 2) 打包 python（arm64 单 ABI，与构建配对）
+dart run serious_python:main package build/python_app -p Android \
+  --arch arm64-v8a --requirements=-r --requirements=python/requirements.txt
+
+# 3) 构建 APK（arm64 单 ABI）
+flutter build apk --release --target-platform android-arm64
+```
+
+**github 直连不稳时的绕行方案**（实测：Gradle 下载 `flet-dev/python-build` dist 与
+`flet-dev/dart-bridge` 会超时失败）：
+1. 预下载到缓存（`~/.flet/cache/python-build/v3.14.7/` 与 `dart-bridge/v1.8.0/`，文件名与
+   gradle 期望一致；直连失败可用镜像 `https://ghproxy.net/<github_url>`）；
+2. 用 gradlew 直接构建并排除下载任务：
+```bash
+cd android
+./gradlew :app:assembleRelease \
+  -x :serious_python_android:downloadDistArchive_arm64-v8a \
+  -x :serious_python_android:downloadDistArchive_armeabi-v7a \
+  -x :serious_python_android:downloadDistArchive_x86_64 \
+  -x :serious_python_android:downloadDartBridge_arm64-v8a \
+  -x :serious_python_android:downloadDartBridge_armeabi-v7a \
+  -x :serious_python_android:downloadDartBridge_x86_64
+```
+
+### 9.3 产物与注意
+
+- APK ≈ **758MB**（app.zip 内含 514MB 真实资源；首次启动解包一次，耗时较长）
+- 验证过的 APK 内容：assets `app.zip`（main.py + python/ + resources/）、
+  `sitepackages.zip`（全部 Python 依赖）、`stdlib.zip`；`lib/arm64-v8a/` 含
+  `libpython3.14.so`、`libdart_bridge.so`、`libfaiss-_swigfaiss.so`、
+  `libonnxruntime-...pybind11_state.so`
+- 真机最终验证：安装 APK → 发送问题 → 检索面板出现真实法条（首次启动等待 python 服务就绪）

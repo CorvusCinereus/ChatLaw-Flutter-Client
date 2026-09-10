@@ -92,7 +92,7 @@ def _get_tokenizer():
             _get_resources_path(), "tokenizer"
         ).replace("\\", "/")
         _tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_path, local_files_only=True
+            tokenizer_path, use_fast=False, local_files_only=True
         )
     return _tokenizer
 
@@ -122,7 +122,9 @@ def main():
     templated = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=True
     )
-    model_inputs = tokenizer([templated], return_tensors="pt")
+    # return_tensors="np"：Android 环境无 torch（Android 端不安装 torch），
+    # 用 numpy 张量（BatchEncoding），服务端 pickle.load 后可正常读取 input_ids 等。
+    model_inputs = tokenizer([templated], return_tensors="np")
 
     out_path = os.path.join(_get_pipeline_dir(), "model_inputs.pkl")
     try:

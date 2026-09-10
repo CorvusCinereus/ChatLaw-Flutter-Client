@@ -1,30 +1,39 @@
 /**
  * @file server_page.dart
- * @brief 服务器配置页面
+ * @brief 服务器配置页面（新增 / 编辑）
  * @author CorvusCinereus
  */
-import 'package:chatlaw/pages/dialog.dart';
-import 'package:chatlaw/internal/config.dart';
-import 'package:chatlaw/pages/page_index.dart';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
+
+import '../internal/config.dart';
+import '../internal/design.dart';
+import 'dialog.dart';
+import 'page_index.dart';
 
 class ServerPage extends StatefulWidget {
   final AppConfig config;
   final String? serverName;
-  final bool _subPage;
+
+  /// true 表示从设置页进入（可删除、名称锁定）；false 表示新增。
+  final bool subPage;
+
   final Function(String name, String address) addServer;
   final Function(String name) removeServer;
   final Function(PageIndex page, {String? serverName}) setPage;
+
+  /// 返回来源页；未注入时回退到开始页。
+  final VoidCallback? onBack;
 
   const ServerPage({
     super.key,
     required this.config,
     this.serverName,
-    required this._subPage,
+    required this.subPage,
     required this.addServer,
     required this.removeServer,
     required this.setPage,
+    this.onBack,
   });
 
   @override
@@ -32,158 +41,177 @@ class ServerPage extends StatefulWidget {
 }
 
 class _ServerPageState extends State<ServerPage> {
+  final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
-  int index = -1;
 
   @override
   void initState() {
     super.initState();
-    if (widget.serverName != null) {
-      index = widget.config.serverConfigs.indexWhere(
-        (element) => element.name == widget.serverName,
+    // 仅在初始化时预填一次（此前在 build 中每次重建都覆盖，会吞掉用户输入）。
+    final name = widget.serverName;
+    if (name != null) {
+      final index = widget.config.serverConfigs.indexWhere(
+        (element) => element.name == name,
       );
-      if (index == -1) {
-        showAlertDialog(
-          context,
-          "找不到服务器${widget.serverName}",
-          textStyle: widget.config.textStyle,
-        );
-        widget.setPage(PageIndex.start);
-      } else {
+      if (index != -1) {
         _nameController.text = widget.config.serverConfigs[index].name;
         _addressController.text = widget.config.serverConfigs[index].address;
+      } else {
+        _nameController.text = name;
       }
     }
   }
 
   @override
+  void dispose() {
+    _nameController.dispose();
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  void _goBack() {
+    final back = widget.onBack;
+    if (back != null) {
+      back();
+    } else {
+      widget.setPage(PageIndex.start);
+    }
+  }
+
+  void _save() {
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    final name = _nameController.text.trim();
+    final address = _addressController.text.trim();
+
+    final exists = widget.config.serverConfigs.any((e) => e.name == name);
+    if (exists && !widget.subPage) {
+      showAlertDialog(
+        context,
+        '服务器「$name」已存在，请更换名称。',
+        textStyle: widget.config.textStyle,
+      );
+      return;
+    }
+
+    widget.addServer(name, address);
+    _goBack();
+  }
+
+  Future<void> _delete() async {
+    final name = widget.serverName;
+    if (name == null) return;
+    final ok = await showAskDialog(
+      context,
+      '确定删除服务器「$name」吗？',
+      destructive: true,
+      confirmText: '删除',
+      textStyle: widget.config.textStyle,
+    );
+    if (!ok) return;
+    widget.removeServer(name);
+    _goBack();
+  }
+
+  String? _validateName(String? value) {
+    if ((value ?? '').trim().isEmpty) return '请填写服务器名称';
+    return null;
+  }
+
+  String? _validateAddress(String? value) {
+    final v = (value ?? '').trim();
+    if (v.isEmpty) return '请填写服务器地址';
+    if (!v.startsWith('http://') && !v.startsWith('https://')) {
+      return '请填写完整地址（以 http:// 或 https:// 开头）';
+    }
+    return null;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    _nameController.text = widget.serverName ?? '';
-    return Container(
-      width: double.infinity,
-      height: double.infinity,
-      padding: const EdgeInsets.all(20),
-      child: SingleChildScrollView(
-        child: Flex(
-          direction: Axis.vertical,
-          mainAxisAlignment: MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.center,
-          spacing: 20,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.black),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Text('服务器名称:', style: widget.config.textStyle),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: TextField(
-                      controller: _nameController,
-                      style: widget.config.textStyle,
-                      decoration: const InputDecoration(hintText: '请输入服务器名称'),
+    final textStyle = widget.config.textStyle;
+    final isEditing = widget.subPage;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(isEditing ? '编辑服务器' : '添加服务器'),
+        leading: IconButton(
+          tooltip: '返回',
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: _goBack,
+        ),
+      ),
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final pad = AppTheme.pagePadding(constraints.maxWidth);
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: AppSizes.formMaxWidth,
+                ),
+                child: Form(
+                  key: _formKey,
+                  child: ListView(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: pad,
+                      vertical: AppSpacing.xl,
                     ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.black),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Text('服务器地址:', style: widget.config.textStyle),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: TextField(
-                      controller: _addressController,
-                      style: widget.config.textStyle,
-                      decoration: const InputDecoration(hintText: '请输入服务器地址'),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Container(
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(
-                border: Border.all(color: Colors.black),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(50),
+                    children: [
+                      TextFormField(
+                        controller: _nameController,
+                        readOnly: isEditing,
+                        textInputAction: TextInputAction.next,
+                        style: textStyle,
+                        decoration: InputDecoration(
+                          labelText: '服务器名称',
+                          hintText: '例如：默认',
+                          prefixIcon: const Icon(Icons.badge_outlined),
+                          helperText: isEditing ? '编辑时不可修改名称' : null,
+                        ),
+                        validator: _validateName,
                       ),
-                      onPressed: () {
-                        if (_nameController.text.isEmpty ||
-                            _addressController.text.isEmpty) {
-                          showAlertDialog(
-                            context,
-                            "请完整输入服务器名称和地址",
-                            textStyle: widget.config.textStyle,
-                          );
-                          return;
-                        }
-                        if (widget.config.serverConfigs.isNotEmpty) {
-                          final index = widget.config.serverConfigs.indexWhere(
-                            (element) => element.name == _nameController.text,
-                          );
-                          if (index != -1 && !widget._subPage) {
-                            showAlertDialog(
-                              context,
-                              "服务器${_nameController.text}已存在",
-                              textStyle: widget.config.textStyle,
-                            );
-                            return;
-                          }
-                        }
-                        widget.addServer(
-                          _nameController.text,
-                          _addressController.text,
-                        );
-                        widget.setPage(PageIndex.start);
-                      },
-                      child: Text('保存', style: widget.config.textStyle),
-                    ),
-                  ),
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        minimumSize: const Size.fromHeight(50),
+                      const SizedBox(height: AppSpacing.lg),
+                      TextFormField(
+                        controller: _addressController,
+                        keyboardType: TextInputType.url,
+                        textInputAction: TextInputAction.done,
+                        style: textStyle,
+                        onFieldSubmitted: (_) => _save(),
+                        decoration: const InputDecoration(
+                          labelText: '服务器地址',
+                          hintText: '例如：http://localhost:8080',
+                          prefixIcon: Icon(Icons.link_rounded),
+                        ),
+                        validator: _validateAddress,
                       ),
-                      onPressed: () async {
-                        if (widget._subPage &&
-                            await showAskDialog(
-                              context,
-                              "确定删除服务器${widget.serverName}吗？",
-                            )) {
-                          widget.removeServer(widget.serverName!);
-                        } else if (widget._subPage) {
-                          return;
-                        }
-                        widget.setPage(PageIndex.start);
-                      },
-                      child: Text(
-                        (widget._subPage) ? '删除' : '取消',
-                        style: widget.config.textStyle,
+                      const SizedBox(height: AppSpacing.xl),
+                      FilledButton(
+                        onPressed: _save,
+                        child: const Text('保存'),
                       ),
-                    ),
+                      if (isEditing) ...[
+                        const SizedBox(height: AppSpacing.md),
+                        OutlinedButton.icon(
+                          onPressed: _delete,
+                          icon: const Icon(Icons.delete_outline,
+                              color: AppColors.danger),
+                          label: const Text(
+                            '删除该服务器',
+                            style: TextStyle(color: AppColors.danger),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: AppColors.danger),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
-                ],
+                ),
               ),
-            ),
-          ],
+            );
+          },
         ),
       ),
     );

@@ -16,7 +16,9 @@ import json
 import sys
 import time
 
+import numpy as np
 from langchain_community.vectorstores import FAISS
+from langchain_core.embeddings import Embeddings
 
 
 def _get_resources_path():
@@ -183,14 +185,17 @@ def parse_law_article_query(query: str, law_name_candidates=None):
     return law_name, article
 
 
-class _OnnxEmbeddings:
+class _OnnxEmbeddings(Embeddings):
     """
     基于 onnxruntime 的向量嵌入（Android 可用，无 torch / sentence-transformers 依赖）。
 
+    继承 langchain_core 的 Embeddings 接口（embed_query / embed_documents），
+    供 FAISS 以标准 Embeddings 对象方式调用。
+
     模型约定：{资源根}/vectorstore/embedding_model/model.onnx
-    - 输入：input_ids / attention_mask（tokenizers 产出，输入名自动匹配模型声明）
+    - 输入：input_ids / attention_mask / token_type_ids（tokenizers 产出，输入名自动匹配模型声明）
     - 输出：已池化并归一化的向量，形状 [batch, dim]
-      （用 sentence-transformers/optimum 导出 ONNX 时 pooling 与 normalize 已内置于图内）
+      （导出时 pooling 与 normalize 已内置于图内，见 develop 侧导出脚本）
     tokenizer 直接复用资源目录中的 tokenizer 文件（transformers 快速分词）。
     """
 
@@ -198,8 +203,11 @@ class _OnnxEmbeddings:
         import onnxruntime
         self._session = onnxruntime.InferenceSession(model_path)
         from transformers import AutoTokenizer
+        # use_fast=False：Android 上 tokenizers 原生库按 cp312 编译（依赖
+        # libpython3.12.so），与内嵌 Python 3.14 不兼容，fast 分词器 dlopen 会失败；
+        # 慢速分词器为纯 Python，能正常加载 tokenizer.json / vocab.txt。
         self._tokenizer = AutoTokenizer.from_pretrained(
-            tokenizer_dir, use_fast=True, local_files_only=True
+            tokenizer_dir, use_fast=False, local_files_only=True
         )
         self._input_names = [i.name for i in self._session.get_inputs()]
 
@@ -207,7 +215,11 @@ class _OnnxEmbeddings:
         enc = self._tokenizer(
             [text], padding=True, truncation=True, max_length=512, return_tensors="np"
         )
-        feeds = {name: enc[name] for name in self._input_names if name in enc}
+        # transformers 的 numpy id 张量可能是 int32，ONNX 模型要求 int64
+        feeds = {
+            name: enc[name].astype(np.int64)
+            for name in self._input_names if name in enc
+        }
         output = self._session.run(None, feeds)[0]
         return output[0].astype(float).tolist()
 

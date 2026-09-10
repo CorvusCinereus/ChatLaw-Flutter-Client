@@ -1,12 +1,11 @@
 import 'package:chatlaw/internal/config.dart';
-import 'package:flutter/material.dart';
 import 'package:test/test.dart';
 
 void main() {
   test('测试配置Json格式转换', () {
     final config = AppConfig.defaultConfig();
     config.history.add({"name": "test", "history": [{"role": "user", "content": "你好"}]});
-    config.lawCaches.add(LawCache("test", ["你好"]));
+    config.lawCaches.add(LawCache("test", ["你好"], ["你好"]));
     final json = config.toJson();
     final config2 = AppConfig.fromJson(json);
     assert(config.textStyle == config2.textStyle);

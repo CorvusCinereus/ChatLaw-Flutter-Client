@@ -26,6 +26,8 @@ langchain-community
 # —— tokenize.py：分词（Qwen3 fast tokenizer，无需 torch/sentencepiece）——
 transformers
 # tokenizers / safetensors / huggingface-hub 等由 transformers 自动携带，镜像均有 android wheel。
+# apply_chat_template（tokenize.py 使用）需要 jinja2（纯 Python，跨平台）。
+jinja2
 
 # —— asr.py：桌面语音转文字工具（Android 由系统语音识别替代）——
 # 桌面端需要时手动安装：funasr_onnx soundfile
