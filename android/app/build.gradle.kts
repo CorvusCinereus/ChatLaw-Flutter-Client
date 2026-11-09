@@ -23,6 +23,14 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 仅构建 arm64-v8a：serious_python 会按 abiFilters 逐个 ABI 跑 pip 安装
+        // python/requirements.txt，而 onnxruntime 在 pypi.flet.dev 镜像只有
+        // arm64_v8a / x86_64 的 android wheel，armeabi-v7a 会解析失败
+        // （Python >= 3.13 本身也已放弃 32 位 Android，PEP 738）。
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {

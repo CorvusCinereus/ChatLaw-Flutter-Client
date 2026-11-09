@@ -1,0 +1,33 @@
+# ChatLaw 客户端独立模块依赖（chatlaw-flutter-client/python/）
+# 适用于 asr.py、rag.py、build.py、tokenize.py 四个模块
+# ★ Android 兼容集（Flet 构建）★
+#
+# 说明：
+#   - 本清单仅含可在 Android 上运行的依赖：编译型依赖全部有 pypi.flet.dev 的
+#     android_24_arm64_v8a wheel（含 cp314），纯 Python 依赖可跨平台。
+#   - 已移除的包及原因：
+#       * funasr_onnx —— 其 numpy<=1.26.4 约束锁死 Python<=3.12，且依赖的 onnx /
+#         kaldi-native-fbank / sentencepiece / librosa(numba) 均无 Android wheel；
+#         ASR 改由 Android 原生语音识别完成，asr.py 仅作桌面/开发工具。
+#       * soundfile / librosa —— asr 的 wav 写入改用标准库 wave，重采样为纯 numpy。
+#       * langchain-huggingface / sentence-transformers —— 依赖 torch（无 Android
+#         wheel）；向量嵌入改用 onnxruntime 实现（见 rag._OnnxEmbeddings）。
+#       * openi —— 其依赖 pwinput 仅有源码包（无 wheel），Flet --only-binary :all:
+#         无法安装；资源应随 APP 打包进 APPDATA_DIR。
+#   - Python 版本：无 numpy<=1.26.4 约束后，Flet 默认的 Python 3.14 即可。
+
+# —— rag.py：知识库检索（FAISS + onnxruntime 嵌入）——
+# 版本钉到 pypi.flet.dev 镜像上存在 android wheel 的版本，避免 Flet Android 打包找不到轮子。
+numpy==2.4.6
+faiss-cpu==1.14.3
+onnxruntime==1.27.0
+langchain-community
+
+# —— tokenize.py：分词（Qwen3 fast tokenizer，无需 torch/sentencepiece）——
+transformers
+# tokenizers / safetensors / huggingface-hub 等由 transformers 自动携带，镜像均有 android wheel。
+# apply_chat_template（tokenize.py 使用）需要 jinja2（纯 Python，跨平台）。
+jinja2
+
+# —— asr.py：桌面语音转文字工具（Android 由系统语音识别替代）——
+# 桌面端需要时手动安装：funasr_onnx soundfile

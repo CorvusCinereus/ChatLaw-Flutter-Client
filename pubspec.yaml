@@ -38,8 +38,14 @@ dependencies:
   flutter_chat_bubble: ^2.0.2
   step_progress: ^2.7.1
   record: ^7.1.1
+<<<<<<< HEAD
   dio: ^5.11.0
   uuid: ^4.6.0
+=======
+  serious_python: ^4.6.0
+  serious_python_android: ^4.6.0
+
+>>>>>>> 7417a5176b1f7f89b37c6e3094d5140f108b7e75
 dev_dependencies:
   flutter_test:
     sdk: flutter

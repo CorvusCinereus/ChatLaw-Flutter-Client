@@ -1,0 +1,238 @@
+"""
+语音转文字（ASR）模块。
+
+将客户端流水线中的「语音转文字」环节整理为独立模块：
+- 所需函数原样搬入本文件，不依赖原 ChatLaw 仓库代码，可独立运行。
+- 资源（Paraformer 语音模型）采用首次调用 run() 时懒加载并缓存，
+  缺失时通过启智社区（openi）自动下载到资源根目录（APPDATA_DIR 或回退的 <仓库根>/resources/）。
+- 对外只暴露一个统一入口 run()，一次调用即可完成整个 ASR 环节。
+
+注意：本模块为**桌面/开发工具**。Android 上 funasr_onnx 及其依赖无 Android wheel，
+语音转文字由 Android 原生语音识别完成（文本直接进入 rag）；funasr 采用延迟导入，
+未安装 funasr_onnx 时模块仍可正常 import。
+"""
+
+import os
+import sys
+import time
+import uuid
+import wave
+
+import numpy as np
+
+
+# ========== 模块级常量 ==========
+TARGET_SR = 16000
+
+
+def _get_resources_path():
+    """
+    返回资源根目录。
+    优先读取环境变量 APPDATA_DIR（由宿主 APP 传入）；
+    未设置时回退到 <仓库根>/resources，便于独立运行与测试。
+    """
+    base = os.getenv("APPDATA_DIR")
+    if base:
+        return base
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "resources",
+    )
+
+
+def _get_pipeline_dir():
+    """
+    返回流水线输出子目录：{资源根}/pipeline。
+    """
+    return os.path.join(_get_resources_path(), "pipeline")
+
+
+AUDIO_CACHE_DIR = os.path.join(_get_resources_path(), "_asr_cache")
+
+_AUDIO_MODEL_FILES = [
+    ".mdl", ".msc", ".mv", "am.mvn",
+    "config.yaml", "configuration.json", "model_quant.onnx", "tokens.json",
+]
+
+
+def _files_complete(resource_dir, required_files):
+    """检查资源目录是否存在且文件齐全。"""
+    if not os.path.isdir(resource_dir):
+        return False
+    return all(
+        os.path.isfile(os.path.join(resource_dir, name))
+        for name in required_files
+    )
+
+
+def _download_audio_model():
+    """
+    从启智社区（openi）下载 Paraformer 语音模型到资源根目录下的 audio_model 子目录
+    （{APPDATA_DIR}/audio_model）。
+    仅在文件不齐全时执行；openi 采用函数内延迟导入，避免模块 import 即依赖。
+    """
+    audio_model_dir = os.path.join(_get_resources_path(), "audio_model")
+    if _files_complete(audio_model_dir, _AUDIO_MODEL_FILES):
+        return
+    import openi
+    openi.openi_download_file(
+        "enter/Paraformer",
+        repo_type="dataset",
+        local_dir=audio_model_dir,
+        max_workers=10,
+    )
+
+
+_audio_model = None
+
+
+def _get_audio_model():
+    """
+    懒加载 Paraformer 语音识别模型。
+    首次调用时确保资源已下载并初始化模型，之后直接复用缓存实例。
+    """
+    global _audio_model
+    if _audio_model is None:
+        _download_audio_model()
+        audio_model_dir = os.path.join(
+            _get_resources_path(), "audio_model"
+        ).replace("\\", "/")
+        os.makedirs(AUDIO_CACHE_DIR, exist_ok=True)
+        # funasr 延迟导入：Android 上未安装 funasr_onnx 时模块仍可 import
+        from funasr_onnx import Paraformer
+        _audio_model = Paraformer(
+            audio_model_dir,
+            batch_size=1,
+            quantize=True,
+            device_id=-1
+        )
+    return _audio_model
+
+
+def _resample(data, orig_sr, target_sr):
+    """
+    用线性插值把音频从 orig_sr 重采样到 target_sr。
+
+    纯 numpy 实现，避免引入 librosa（其 numba/llvmlite 依赖在部分平台
+    （Android / 新版 Python）没有预编译 wheel，会导致 pip 解析失败）。
+    输出采样数约为 len(data) * target_sr / orig_sr（向上取整，与 librosa 近似）。
+    """
+    n_out = max(1, int(np.ceil(len(data) * target_sr / orig_sr)))
+    x_old = np.linspace(0.0, len(data), len(data), endpoint=False)
+    x_new = np.linspace(0.0, len(data), n_out, endpoint=False)
+    return np.interp(x_new, x_old, data).astype(np.float32)
+
+
+def speech_to_text(audio, target_sr, audio_cache_dir, audio_model):
+    """
+    audio: (sample_rate, numpy_array)
+    return: 中文文本
+    """
+    if audio is None:
+        return "未检测到语音输入"
+
+    sr, data = audio
+
+    # ---------- 1. 转单声道 ----------
+    if data.ndim > 1:
+        data = data.mean(axis=1)
+
+    data = data.astype(np.float32)
+
+    # ---------- 2. 重采样到 16k ----------
+    if sr != target_sr:
+        data = _resample(data, sr, target_sr)
+
+    # ---------- 3. 幅值归一化（防止过小） ----------
+    max_val = np.max(np.abs(data))
+    if max_val > 0:
+        data = data / max_val * 0.9
+
+    # ---------- 4. 时长校验 ----------
+    duration = len(data) / target_sr
+    if duration < 0.8:
+        return "语音过短，请说完整一句话"
+
+    # ---------- 5. 写入固定目录 wav（避免 tempfile 坑；用标准库 wave，不依赖 soundfile） ----------
+    wav_name = f"{uuid.uuid4().hex}.wav"
+    wav_path = os.path.join(audio_cache_dir, wav_name)
+
+    with wave.open(wav_path, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(target_sr)
+        wf.writeframes((np.clip(data, -1.0, 1.0) * 32767).astype(np.int16).tobytes())
+
+    # 确保文件完全落盘（Windows 必须）
+    time.sleep(0.05)
+
+    # ---------- 6. 调用 Paraformer ONNX ----------
+    try:
+        result = audio_model([wav_path])
+    except Exception as e:
+        return f"ASR 推理异常: {e}"
+    finally:
+        try:
+            os.remove(wav_path)
+        except Exception:
+            pass
+
+    # ---------- 7. 正确解析 funasr-onnx 返回 ----------
+    # 返回格式示例：
+    # [{'preds': ('如何理解等差数列', ['如','何','理','解','等','差','数','列'])}]
+    if not result or not isinstance(result, list):
+        return "未识别到有效内容"
+
+    preds = result[0].get("preds", None)
+    if not preds or not isinstance(preds, tuple):
+        return "未识别到有效内容"
+
+    text = preds[0].strip()
+    if not text:
+        raise ValueError("语音未识别到有效内容！")
+
+    return text
+
+
+def _save_asr_result(text):
+    """
+    把识别文本写入 {资源根}/pipeline/asr_result.txt。
+    写失败仅打印 stderr 警告，不影响返回值。
+    """
+    try:
+        out_dir = _get_pipeline_dir()
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "asr_result.txt"), "w", encoding="utf-8") as f:
+            f.write(text)
+    except Exception as e:
+        print(f"[asr] 保存识别文本失败: {e}", file=sys.stderr)
+
+
+def run(audio):
+    """
+    语音转文字模块的统一入口，一次调用完成整个 ASR 环节。
+
+    识别结果会同时写入 {APPDATA_DIR}/pipeline/asr_result.txt。
+
+    Args:
+        audio: (sample_rate, numpy_array)，来自麦克风输入的音频。
+
+    Returns:
+        str: 识别出的中文文本或错误提示。
+    """
+    text = speech_to_text(
+        audio=audio,
+        target_sr=TARGET_SR,
+        audio_cache_dir=AUDIO_CACHE_DIR,
+        audio_model=_get_audio_model()
+    )
+    _save_asr_result(text)
+    return text
+
+
+__all__ = [
+    "run",
+    "speech_to_text",
+    "TARGET_SR",
+    "AUDIO_CACHE_DIR",
+]
